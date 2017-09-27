@@ -1,0 +1,114 @@
+\documentclass[a4paper]{article}
+\usepackage{geometry}
+
+\title{A model for interactive medias}
+\begin{document}
+
+\section{Introduction}
+Objectif: lier paradigme du séquenceur et paradigme du patcher
+
+Ce qui manque: déclaration de variables locales pour nommage ? Actuellement on utilise des variables globales si on veut un nom.
+
+=> comment est-ce qu'on peut combiner de la meilleure manière possible l'univers des patchers et des séquenceurs.
+
+=> décrire requirements pour qu'un autre système de contraintes temporelles puisse fonctionner 
+=> au minimum : enable / disable
+=> set date
+=> set offset pour offset audio (p-ê pas nécessaire si on fait comme LAStream)
+
+Pbq si on fait ça en fonctionnel: construction obligatoire en "top-down" ? on commence par les processus, puis les contraintes, etc. 
+sinon on doit parcourir tout pour remplacer ce qu'on veut
+
+- Langage: formalisation par ML ? utilisation par QML ?
+
+- Tête d'un langage "ML" : quelles sont les opérations que l'on fait ? 
+
+% TODO audio : plutôt que stocker du std::vector<std::vector<float>> pourquoi pas un gsl::span<gsl::span<float>>
+\section{Temporal model}
+\subsection{Data types}
+process, interval, event, sync
+
+actions: 
+
+add_process interval process -> interval
+add_interval sc itv sev eev
+add_event sync
+add_sync sc
+
+exécution : 
+
+interval: 
+  tick: interval * t -> interval * state
+
+processes:
+  state: process * t -> process * state
+
+\subsection{Temporal graph: scenario}
+
+state:
+
+process_event:
+
+
+
+\subsection{Loop}
+
+\section{Data model}
+\subsection{Data types}
+\subsection{Operations}
+\subsection{Data processes}
+\subsubsection{Automation}
+\subsubsection{Mapping}
+\subsubsection{JavaScript}
+\subsubsection{Piano Roll}
+\subsubsection{Sound file}
+\subsubsection{Sound input}
+
+\subsubsection{Shader}
+\subsubsection{3D model}
+gltf ? 
+
+\section{Combined model}
+\subsection{}
+
+\section{Proposed sequencer behaviour}
+UI: création automatique de liens implicites des enfants vers les parents
+=> "cable créé par défaut" quand on rajoute un processus dont on marque l'entrée
+
+=> pour toute contrainte, pour tout scénario, créer noeud qui fait le mixage
+=> création d'objets récursivement, etc
+
+- Problème des states dans scénario ?
+=> states du scénario: comment interviennent-ils ? faire un scénario fantôme *
+
+
+- Mettre l'accent sur la recréation de la sémantique de i-score à partir du graphe: 
+=> messages: actuellement "peu" typés ; rajouter type de l'unité ? 
+
+=> pbq du multicanal: pour l'instant non traitée, on ne gère que les cas mono / stereo pour le upmix / downmix
+=> sliders et dispatching de canaux ?
+=> cables: rubberband ? il faut mettre un rubberband dès qu'on a une entrée et une sortie qui n'ont pas la même vitesse relative. Dire que pour les automations ça interpole de manière naturelle avec le ralentissement et l'accélération (on sépare vitesse et granularité)
+
+Exécution complète d'un tick: 
+
+- Copie des buffers audio
+- Exécution du tick temporel
+- Récupération des states
+
+- Dire qu'on pourrait affiner en combinant plus précisément les "sous-ticks" temporels et de données
+pour que par exemple la production d'un état dans un scénario entraîne une condition dans un autre scénario
+
+
+\section{Applications}
+- Exemple article Myriam: micro-montage et sélection d'effets
+
+\section{Evaluation}
+- Recréer séquenceur traditionnel, patcher, et ableton live (vue session).
+
+=> "third gen" audio sequencer.
+first gen: cubase, etc
+second gen: non-linear: ableton, bitwig
+third gen: i-score
+
+\section{Conclusion}
+\end{document}
