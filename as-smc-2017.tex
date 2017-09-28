@@ -1,11 +1,21 @@
 \documentclass[a4paper]{article}
 \usepackage{geometry}
-
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{qtree}
+\usepackage{tkz-graph}  
+\usetikzlibrary{shapes.geometric,positioning,fit,backgrounds}
+\newcommand\mg[1]{\ensuremath{ {\boldsymbol<} #1 {\boldsymbol>} }}
+\DeclareMathOperator{\tc}{TC}
+\DeclareMathOperator{\ic}{IC}
+\DeclareMathOperator{\itv}{I}
 \title{A model for interactive medias}
 \begin{document}
 
 \section{Introduction}
 Objectif: lier paradigme du séquenceur et paradigme du patcher
+
+Donner une sémantique formelle à l'exécution de ces structures.
 
 Ce qui manque: déclaration de variables locales pour nommage ? Actuellement on utilise des variables globales si on veut un nom.
 
@@ -25,37 +35,210 @@ sinon on doit parcourir tout pour remplacer ce qu'on veut
 
 % TODO audio : plutôt que stocker du std::vector<std::vector<float>> pourquoi pas un gsl::span<gsl::span<float>>
 \section{Temporal model}
+We note: $\tc$ for the temporal conditions, $\ic$ for the instantaneous conditions, $\itv$ for the intervals.
+chaining:
+\begin{figure}[h]
+    \centering
+    \small\def\qtreeunaryht{2ex}
+    \Tree [.interval
+        [.scenario 
+            [.interval~I_1 mapping ] 
+            [.interval~I_2 [.loop [.interval automation ] ] ] 
+            interval~I_3 
+            [.interval~I_4 sound ] 
+            interval~I_5 
+        ] 
+        !\qsetw{1mm}  automation sound  ]
+    \caption{Hierarchical tree}
+\end{figure}
+% TODO représenter trace d'exécution
+\begin{figure}[h]
+    \centering
+    
+    
+    \tikzstyle{VertexStyle}=[
+        shape=ellipse,
+        minimum width=6ex,
+        draw
+    ]
+    
+    \tikzstyle{EdgeStyle}=[
+        ->,
+        >=stealth'
+    ]
+    \tikzstyle{TimeSync}=[
+        rounded corners=.15cm, 
+        fill=orange!30, 
+        draw=orange, 
+        fill opacity=0.3
+    ]
+    
+    \begin{tikzpicture} 
+    \pgfdeclarelayer{box}
+    \pgfdeclarelayer{text}
+    \pgfsetlayers{box,text}
+    \begin{pgfonlayer}{text}
+    \SetGraphUnit{1.5} 
+    \Vertex[L=$\ic_1$]{C1} \EA[L=$\itv_1$](C1){I1} \EA[L=$\ic_2$](I1){C2} \EA[L=$\itv_4$](C2){I4}
+    \SO[L=$\ic_3$](C1){C3} \EA[L=$\itv_2$](C3){I2} \SOEA[L=$\ic_5$](I4){C5}
+    \SOEA[L=$\itv_3$](C3){I3} \EA[L=$\ic_4$](I3){C4} \EA[L=$\itv_5$](C4){I5}
+    
+    \Edges(C1, I1, C2, I4, C5)
+    \Edges(C3, I2, C2)
+    \Edges(C4, I5, C5)
+    \Edges(C3, I3, C4)
+    \end{pgfonlayer}
+    
+    \begin{pgfonlayer}{box}
+    \node[fit=(C1) (C3), TimeSync, label=above:$\tc_1$] {};
+    \node[fit=(C2), TimeSync, label=above:$\tc_2$] {};
+    \node[fit=(C4), TimeSync, label=above:$\tc_3$] {};
+    \node[fit=(C5), TimeSync, label=above:$\tc_4$] {};
+    
+    \end{pgfonlayer}
+    \end{tikzpicture}
+    
+    \caption{Temporal DAG}
+\end{figure}
 \subsection{Data types}
 process, interval, event, sync
 
-actions: 
 
+
+\subsubsection{Conditions and expressions}
+
+We first define the conditional operations we want to be able to express.
+We restrain ourselves to simple propositional logic operands: \textbf{and}, \textbf{or}, \textbf{not}.
+
+Expressions operate on addresses and values of the device tree presented in chap.~\ref{chap.control}, according to the grammar in \ref{fig.expr.grammar}.
+
+Formally, expressions are defined as a tree:
+Let \textbf{Comparator} be an identifier for standard value comparison operations: $<, \leq, >, \geq, =, \neq$ and \textbf{Operator} standard logical operators \textbf{and} \&  \textbf{or}.
+
+\begin{align*}
+    \mathbf{Atom} & :  (\mathrm{Parameter} \mid \mathrm{Value}) \times (\mathrm{Parameter} \mid \mathrm{Value}) \times \mathrm{Comparator} \\
+    \mathbf{Negation} & : \mathrm{Expression} \\
+    \mathbf{Composition} & : \mathrm{Expression} \times \mathrm{Expression} \times \mathrm{Operator} \\
+    \mathbf{Impulse} & : \mathrm{Parameter} \times \mathrm{Bool} \\
+    \mathbf{Expression} &: \mathrm{Atom} \mid \mathrm{Negation} \mid \mathrm{Composition} \mid \mathrm{Impulse}
+\end{align*}
+
+Two operations are defined on expressions and the data types that compose them: 
+
+\begin{itemize}
+    \item $\mathbf{update}: \mathrm{Expression} \rightarrow \mathrm{Expression}$. Used to reset any internal state and query up-to-date values for the expressions. For instance, $\mathbf{update}$ on an $\mathbf{Atom}$ fetches if possible new values for the parameters, why may include network requests.
+    \item $\mathbf{evaluate}: \mathrm{Expression} \rightarrow \mathrm{Bool}$. Performs the actual logical expression evaluation, according to the expected rules. %TODO spécifier correctement Pulse
+\end{itemize}
+
+Precisely:
+\[
+\begin{cases}
+\mathrm{update} : & \mathrm{Composition} \rightarrow \mathrm{Composition} \\ 
+& (e_1, e_2, o) \mapsto (\mathrm{update}~e_1, \mathrm{update}~e_2, o) \\
+\mathrm{update} : & \mathrm{Negation} \rightarrow \mathrm{Negation} \\
+&  (e_1) \mapsto (\mathrm{update}~ e_1) \\
+\mathrm{update} :&  \mathrm{Atom} \rightarrow \mathrm{Atom} \\
+& \begin{cases}
+(p_1, p_2) \mapsto (\mathrm{pull}~p_1, \mathrm{pull}~p_2) \\
+(p_1, v_2) \mapsto (\mathrm{pull}~p_1, v_2) \\ 
+\dots
+\end{cases}\\
+\mathrm{update} : & \mathrm{Impulse} \rightarrow \mathrm{Impulse} \\
+& (p, b) \mapsto (p, \mathrm{false})
+\end{cases}
+\] 
+
+
+\begin{itemize}
+    \item An atom is a comparison between two parameters, a parameter and a value, or two values.
+    \item Negations and compositions are the traditional predicate logic building blocks.
+    \item We introduce a specific operator, ``impulse'', which allows to decide whether a value was received.
+\end{itemize}
+
+\subsubsection{Interval}
+We want to be able to express the passing of time, for a given duration.
+This duration may or may not be finite.
+
+A duration is defined as a positive integer.
+An interval is at its core a set of durations: a min, an optional max, and the current position. 
+The lack of max means infinity.
+An interval is said to be fixed when its min equals its max.
+\[
+\mathbf{Interval} = \mathrm{Duration} \times \mathrm{Optional\mg{Duration}} \mathrm{Duration}
+\]
+
+The time scale is not specified by the system: for instance, when working with audio data it may be better to use the audio sample as a base unit of time.
+But many applications don't use the audio rate: when working purely with visuals it may be better to use the screen refresh rate as time base in order not to 
+waste computer resources and energy.
+
+\subsubsection{Instantaneous condition}
+\subsubsection{Temporal condition}
+Then, we want to be able to enable or disable events and intervals according to a condition, given in the expression language seen in \ref{sec.temporal.conditions}.
+
+\[
+\mathbf{Condition} = \mathrm{Expression}
+\]
+
+A condition has two associated operations: \texttt{evaluate} and \texttt{update}.
+
+\begin{lstlisting}
+update expression -> expression
+\end{lstlisting}
+
+\begin{lstlisting}
+evaluate expression -> Bool
+\end{lstlisting}
+
+
+\subsubsection{Process}
+
+\subsubsection{Operations}
+\begin{lstlisting}
 add_process interval process -> interval
-add_interval sc itv sev eev
+\end{lstlisting}
+
+\begin{lstlisting}
 add_event sync
-add_sync sc
+\end{lstlisting}
 
 exécution : 
 
 interval: 
+\begin{lstlisting}
   tick: interval * t -> interval * state
+  \end{lstlisting}
 
 processes:
+\begin{lstlisting}
   state: process * t -> process * state
+  \end{lstlisting}
 
 \subsection{Temporal graph: scenario}
 
+\subsubsection{Creational operations}
+\begin{lstlisting}
 state:
+\end{lstlisting}
 
+\begin{lstlisting}
 process_event:
+\end{lstlisting}
 
-
+\subsubsection{Execution operations}
+\begin{lstlisting}
+add_interval sc itv sev eev
+\end{lstlisting}
+\begin{lstlisting}
+add_sync sc
+\end{lstlisting}
 
 \subsection{Loop}
-
+Pbq: not introducing cycles in the temporal graph
 \section{Data model}
+
 \subsection{Data types}
 \subsection{Operations}
+\subsection{Data graph}
 \subsection{Data processes}
 \subsubsection{Automation}
 \subsubsection{Mapping}
@@ -86,6 +269,7 @@ UI: création automatique de liens implicites des enfants vers les parents
 => messages: actuellement "peu" typés ; rajouter type de l'unité ? 
 
 => pbq du multicanal: pour l'instant non traitée, on ne gère que les cas mono / stereo pour le upmix / downmix
+Choix pour multicanal: faire comme jamoma avec objets tilde
 => sliders et dispatching de canaux ?
 => cables: rubberband ? il faut mettre un rubberband dès qu'on a une entrée et une sortie qui n'ont pas la même vitesse relative. Dire que pour les automations ça interpole de manière naturelle avec le ralentissement et l'accélération (on sépare vitesse et granularité)
 
@@ -101,7 +285,7 @@ pour que par exemple la production d'un état dans un scénario entraîne une co
 
 \section{Applications}
 - Exemple article Myriam: micro-montage et sélection d'effets
-
+- Carrousel
 \section{Evaluation}
 - Recréer séquenceur traditionnel, patcher, et ableton live (vue session).
 
