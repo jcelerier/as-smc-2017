@@ -1,105 +1,126 @@
-\documentclass[a4paper]{article}
-\usepackage{geometry}
-\usepackage{amsmath}
+
+%=================================================================
+\documentclass[applsci,article,submit,moreauthors,pdftex,10pt,a4paper]{mdpi}
+%=================================================================
+\firstpage{1} 
+\makeatletter 
+\setcounter{page}{\@firstpage} 
+\makeatother 
+\articlenumber{x}
+\doinum{10.3390/------}
+\pubvolume{xx}
+\pubyear{2017}
+\copyrightyear{2017}
+\externaleditor{Academic Editor: name}
+\history{Received: date; Accepted: date; Published: date}
+
+%------------------------------------------------------------------
+% The following line should be uncommented if the LaTeX file is uploaded to arXiv.org
+%\pdfoutput=1
+
+%=================================================================
+% Add packages and commands here. The following packages are loaded in our class file: fontenc, calc, indentfirst, fancyhdr, graphicx, lastpage, ifthen, lineno, float, amsmath, setspace, enumitem, mathpazo, booktabs, titlesec, etoolbox, amsthm, hyphenat, natbib, hyperref, footmisc, geometry, caption, url, mdframed, tabto, soul, multirow, microtype, tikz
+
+
 \usepackage{listings}
 \usepackage{qtree}
 \usepackage{tkz-graph}  
 \usetikzlibrary{shapes.geometric,positioning,fit,backgrounds}
+%=================================================================
+%% Please use the following mathematics environments: Theorem, Lemma, Corollary, Proposition, Characterization, Property, Problem, Example, ExamplesandDefinitions, Hypothesis, Remark, Definition
+%% For proofs, please use the proof environment (the amsthm package is loaded by the MDPI class).
+
+%=================================================================
+% Full title of the paper (Capitalized)
+\Title{A model for interactive media authoring}
+
+% Author Orchid ID: enter ID or remove command
+\newcommand{\orcidauthorA}{0000-0003-1253-298X} % Add \orcidA{} behind the author's name
+%\newcommand{\orcidauthorB}{0000-0000-000-000X} % Add \orcidB{} behind the author's name
+
+% Authors, for the paper (add full first names)
+\Author{Jean-Michaël Celerier $^{1,\dagger,\ddagger}$\orcidA{}, Myriam Desainte-Catherine $^{1,\ddagger}$ and Bernard Serpette $^{2,}$*}
+
+% Authors, for metadata in PDF
+\AuthorNames{Jean-Michaël Celerier, Myriam Desainte-Catherine and Bernard Serpette}
+
+% Affiliations / Addresses (Add [1] after \address if there is only one affiliation.)
+\address{%
+    $^{1}$ \quad Affiliation 1; e-mail@e-mail.com\\
+    $^{2}$ \quad Affiliation 2; e-mail@e-mail.com}
+
+% Contact information of the corresponding author
+\corres{Correspondence: e-mail@e-mail.com; Tel.: +x-xxx-xxx-xxxx}
+
+% Current address and/or shared authorship
+\firstnote{Current address: Affiliation 3} 
+\secondnote{These authors contributed equally to this work.}
+% The commands \thirdnote{} till \eighthnote{} are available for further notes
+
+% Simple summary
+%\simplesumm{}
+
+% Abstract (Do not insert blank lines, i.e. \\) 
+\abstract{A single paragraph of about 200 words maximum. For research articles, abstracts should give a pertinent overview of the work. We strongly encourage authors to use the following style of structured abstracts, but without headings: 1) Background: Place the question addressed in a broad context and highlight the purpose of the study; 2) Methods: Describe briefly the main methods or treatments applied; 3) Results: Summarize the article's main findings; and 4) Conclusion: Indicate the main conclusions or interpretations. The abstract should be an objective representation of the article, it must not contain results which are not presented and substantiated in the main text and should not exaggerate the main conclusions.}
+
+% Keywords
+\keyword{interactive scores; intermedia; dataflow; patcher; i-score}
+
+% The fields PACS, MSC, and JEL may be left empty or commented out if not applicable
+%\PACS{J0101}
+%\MSC{}
+%\JEL{}
+
+
+\featuredapplication{Authors are encouraged to provide a concise description of the specific application or a potential application of the work. This section is not mandatory.}
+
+
 \newcommand\mg[1]{\ensuremath{ {\boldsymbol<} #1 {\boldsymbol>} }}
 \DeclareMathOperator{\tc}{TC}
 \DeclareMathOperator{\ic}{IC}
 \DeclareMathOperator{\itv}{I}
-\title{A model for interactive medias}
+\title{A model for interactive media authoring}
 \begin{document}
 
 \section{Introduction}
-Objectif: lier paradigme du séquenceur et paradigme du patcher
+% TODO pour thèse: reviews: Carla Scaletti ? Victor Lazzarini ? 
+Many music software fit in one of three categories: sequencers, patchers, and textual programming environments. Sequencers are used to describe temporal behaviours: an audio clip plays after another, while an automation curve changes an audio filter. Patchers are more commonly used to describe invariants: for instance specific audio filters, or compositional patterns. 
 
-Donner une sémantique formelle à l'exécution de ces structures.
+We propose in this paper a method that combines the sequencer and the patcher paradigm in a live system.  
 
-Ce qui manque: déclaration de variables locales pour nommage ? Actuellement on utilise des variables globales si on veut un nom.
+The general approach is as follows: we first define the temporal structure, which allows to position events and processes relatively to each other, hierarchically, and in a timely fashion. Then, we define a graph structure akin to dataflows, which is extended with special connection types to take into account the fact that nodes of the graph might not always be active at the same time. Both structures are then combined: the state of the temporal processes is bound to the dataflow nodes. This combination is then expanded with specific implicit cases that are relevant in computer music workflows. These cases are described using structures wrapping the temporal and dataflow graphs.
 
-=> comment est-ce qu'on peut combiner de la meilleure manière possible l'univers des patchers et des séquenceurs.
+The usage of the system is presented in example compositions: the first one is an example of audio editing, the second an interactive musical installation.
 
-=> décrire requirements pour qu'un autre système de contraintes temporelles puisse fonctionner 
-=> au minimum : enable / disable
-=> set date
-=> set offset pour offset audio (p-ê pas nécessaire si on fait comme LAStream)
+% Ce qui manque: déclaration de variables locales pour nommage ? Actuellement on utilise des variables globales si on veut un nom.
 
-Pbq si on fait ça en fonctionnel: construction obligatoire en "top-down" ? on commence par les processus, puis les contraintes, etc. 
-sinon on doit parcourir tout pour remplacer ce qu'on veut
+% => décrire requirements pour qu'un autre système de contraintes temporelles puisse fonctionner 
+% => au minimum : enable / disable
 
-- Langage: formalisation par ML ? utilisation par QML ?
-
-- Tête d'un langage "ML" : quelles sont les opérations que l'on fait ? 
+%Pbq si on fait ça en fonctionnel: construction obligatoire en "top-down" ? on commence par les processus, puis les contraintes, etc. 
+% sinon on doit parcourir tout pour remplacer ce qu'on veut
 
 % TODO audio : plutôt que stocker du std::vector<std::vector<float>> pourquoi pas un gsl::span<gsl::span<float>>
+
+% Sample accuracy pour audio ? on pourrait faire un tick par échantillon au prix de la performance. Mais pb avec PureData, etc. qui veulent 64 samples: il faudrait un mécanisme de buffering...
+% Changements de vitesse: introduire des noeuds de "rescaling"  dès qu'on a deux objets qui sont en relation et peuvent avoir une vitesse différente. eg deux processus 
+\subsection{State of the art}
+base: max, pd, séquenceurs: cubase/protools , live/bitwig...
+
+openmusic
+
+antescofo
+
+inscore
+
+\subsection{Relationship with i-score}
+-> formalisation du papier icmc
+
+-> refonte suite à tentative avec LibAudioStream
+
 \section{Temporal model}
 We note: $\tc$ for the temporal conditions, $\ic$ for the instantaneous conditions, $\itv$ for the intervals.
-chaining:
-\begin{figure}[h]
-    \centering
-    \small\def\qtreeunaryht{2ex}
-    \Tree [.interval
-        [.scenario 
-            [.interval~I_1 mapping ] 
-            [.interval~I_2 [.loop [.interval automation ] ] ] 
-            interval~I_3 
-            [.interval~I_4 sound ] 
-            interval~I_5 
-        ] 
-        !\qsetw{1mm}  automation sound  ]
-    \caption{Hierarchical tree}
-\end{figure}
-% TODO représenter trace d'exécution
-\begin{figure}[h]
-    \centering
-    
-    
-    \tikzstyle{VertexStyle}=[
-        shape=ellipse,
-        minimum width=6ex,
-        draw
-    ]
-    
-    \tikzstyle{EdgeStyle}=[
-        ->,
-        >=stealth'
-    ]
-    \tikzstyle{TimeSync}=[
-        rounded corners=.15cm, 
-        fill=orange!30, 
-        draw=orange, 
-        fill opacity=0.3
-    ]
-    
-    \begin{tikzpicture} 
-    \pgfdeclarelayer{box}
-    \pgfdeclarelayer{text}
-    \pgfsetlayers{box,text}
-    \begin{pgfonlayer}{text}
-    \SetGraphUnit{1.5} 
-    \Vertex[L=$\ic_1$]{C1} \EA[L=$\itv_1$](C1){I1} \EA[L=$\ic_2$](I1){C2} \EA[L=$\itv_4$](C2){I4}
-    \SO[L=$\ic_3$](C1){C3} \EA[L=$\itv_2$](C3){I2} \SOEA[L=$\ic_5$](I4){C5}
-    \SOEA[L=$\itv_3$](C3){I3} \EA[L=$\ic_4$](I3){C4} \EA[L=$\itv_5$](C4){I5}
-    
-    \Edges(C1, I1, C2, I4, C5)
-    \Edges(C3, I2, C2)
-    \Edges(C4, I5, C5)
-    \Edges(C3, I3, C4)
-    \end{pgfonlayer}
-    
-    \begin{pgfonlayer}{box}
-    \node[fit=(C1) (C3), TimeSync, label=above:$\tc_1$] {};
-    \node[fit=(C2), TimeSync, label=above:$\tc_2$] {};
-    \node[fit=(C4), TimeSync, label=above:$\tc_3$] {};
-    \node[fit=(C5), TimeSync, label=above:$\tc_4$] {};
-    
-    \end{pgfonlayer}
-    \end{tikzpicture}
-    
-    \caption{Temporal DAG}
-\end{figure}
+chaining.
 \subsection{Data types}
 process, interval, event, sync
 
@@ -162,37 +183,34 @@ This duration may or may not be finite.
 A duration is defined as a positive integer.
 An interval is at its core a set of durations: a min, an optional max, and the current position. 
 The lack of max means infinity.
-An interval is said to be fixed when its min equals its max.
-\[
-\mathbf{Interval} = \mathrm{Duration} \times \mathrm{Optional\mg{Duration}} \mathrm{Duration}
-\]
+An interval is said to be fixed when its min equals its max. It may be enabled or disabled.
+\begin{align*}
+\mathbf{Status} &= \mathrm{Waiting} \mid \mathrm{Pending} \mid \mathrm{Happened} \mid \mathrm{Disposed} \\
+\mathbf{Interval} &= \mathrm{Duration} \times \mathrm{Maybe} ~\mathrm{Duration} \times \mathrm{Duration} \times \mathrm{Status}
+\end{align*}
 
 The time scale is not specified by the system: for instance, when working with audio data it may be better to use the audio sample as a base unit of time.
 But many applications don't use the audio rate: when working purely with visuals it may be better to use the screen refresh rate as time base in order not to 
 waste computer resources and energy.
 
 \subsubsection{Instantaneous condition}
-\subsubsection{Temporal condition}
-Then, we want to be able to enable or disable events and intervals according to a condition, given in the expression language seen in \ref{sec.temporal.conditions}.
+Then, we want to be able to enable or disable events and intervals according to a condition, given in the expression language seen in \ref{sec.temporal.conditions}. An instantaneous condition is defined as follows: 
 
 \[
-\mathbf{Condition} = \mathrm{Expression}
+\mathbf{Condition} = \mathrm{Expression} \times \mathrm{Interval}[] \times \mathrm{Interval}[] \times \mathrm{Status}
 \]
 
-A condition has two associated operations: \texttt{evaluate} and \texttt{update}.
+It is preceded and followed by a set of intervals.
+The most common case for an expression is to be true.
 
-\begin{lstlisting}
-update expression -> expression
-\end{lstlisting}
 
-\begin{lstlisting}
-evaluate expression -> Bool
-\end{lstlisting}
-
+\subsubsection{Temporal condition}
+A temporal condition
 
 \subsubsection{Process}
 
 \subsubsection{Operations}
+
 \begin{lstlisting}
 add_process interval process -> interval
 \end{lstlisting}
@@ -215,6 +233,74 @@ processes:
 
 \subsection{Temporal graph: scenario}
 
+\begin{figure}[h]
+    \centering
+    \small\def\qtreeunaryht{2ex}
+    \Tree [.interval
+    [.scenario 
+    [.interval~I_1 mapping ] 
+    [.interval~I_2 [.loop [.interval automation ] ] ] 
+    interval~I_3 
+    [.interval~I_4 sound ] 
+    [.interval~I_5 effect ]
+    ] 
+    !\qsetw{1mm}  automation sound  ]
+    \caption{Hierarchical tree}
+\end{figure}
+% TODO représenter trace d'exécution
+\begin{figure}[h]
+    \centering
+    
+    \tikzstyle{VertexStyle}=[
+    shape=ellipse,
+    minimum width=6ex,
+    draw
+    ]
+    
+    \tikzstyle{EdgeStyle}=[
+    ->,
+    >=stealth'
+    ]
+    \tikzstyle{EditTimeSync}=[
+    rounded corners=.15cm, 
+    fill=gray!30, 
+    draw=gray, 
+    fill opacity=0.3
+    ]
+    \tikzstyle{WaitTimeSync}=[
+    rounded corners=.15cm, 
+    fill=orange!30, 
+    draw=orange, 
+    fill opacity=0.3
+    ]
+    
+    \begin{tikzpicture} 
+    \pgfdeclarelayer{box}
+    \pgfdeclarelayer{text}
+    \pgfsetlayers{box,text}
+    \begin{pgfonlayer}{text}
+    \SetGraphUnit{1.5} 
+    \Vertex[L=$\ic_1$]{C1} \EA[L=$\itv_1$](C1){I1} \EA[L=$\ic_2$](I1){C2} \EA[L=$\itv_4$](C2){I4}
+    \SO[L=$\ic_3$](C1){C3} \EA[L=$\itv_2$](C3){I2} \SOEA[L=$\ic_5$](I4){C5}
+    \SOEA[L=$\itv_3$](C3){I3} \EA[L=$\ic_4$](I3){C4} \EA[L=$\itv_5$](C4){I5}
+    
+    \Edges(C1, I1, C2, I4, C5)
+    \Edges(C3, I2, C2)
+    \Edges(C4, I5, C5)
+    \Edges(C3, I3, C4)
+    \end{pgfonlayer}
+    
+    \begin{pgfonlayer}{box}
+    \node[fit=(C1) (C3), EditTimeSync, label=above:$\tc_1$] {};
+    \node[fit=(C2), EditTimeSync, label=above:$\tc_2$] {};
+    \node[fit=(C4), EditTimeSync, label=above:$\tc_3$] {};
+    \node[fit=(C5), EditTimeSync, label=above:$\tc_4$] {};
+    \end{pgfonlayer}
+    \end{tikzpicture}
+    
+    \caption{Temporal DAG}
+\end{figure}
+
 \subsubsection{Creational operations}
 \begin{lstlisting}
 state:
@@ -232,20 +318,32 @@ add_interval sc itv sev eev
 add_sync sc
 \end{lstlisting}
 
+
 \subsection{Loop}
 Pbq: not introducing cycles in the temporal graph
 \section{Data model}
+=> set date
+=> set offset pour offset audio (p-ê pas nécessaire si on fait comme LAStream)
 
 \subsection{Data types}
+
+\begin{lstlisting}
+add_node graph 
+connect graph node node edge
+\end{lstlisting}
 \subsection{Operations}
 \subsection{Data graph}
-\subsection{Data processes}
+\subsection{Data nodes}
+\subsubsection{Passthrough}
+-> used for scenario and interval
+
 \subsubsection{Automation}
 \subsubsection{Mapping}
 \subsubsection{JavaScript}
 \subsubsection{Piano Roll}
 \subsubsection{Sound file}
 \subsubsection{Sound input}
+\subsubsection{Mix}
 
 \subsubsection{Shader}
 \subsubsection{3D model}
@@ -287,12 +385,31 @@ pour que par exemple la production d'un état dans un scénario entraîne une co
 - Exemple article Myriam: micro-montage et sélection d'effets
 - Carrousel
 \section{Evaluation}
-- Recréer séquenceur traditionnel, patcher, et ableton live (vue session).
+\subsection{Notes on implementation}
+- Recréation séquenceur traditionnel, patcher, et ableton live (vue session).
+
 
 => "third gen" audio sequencer.
 first gen: cubase, etc
 second gen: non-linear: ableton, bitwig
 third gen: i-score
 
+reproducibilité: code source dispo
+\section{Discussion}
 \section{Conclusion}
+
+
+\supplementary{The following are available online at www.mdpi.com/link, Figure S1: title, Table S1: title, Video S1: title.}
+
+\acknowledgments{
+    Blue Yeti, ANRT, SCRIME 
+    All sources of funding of the study should be disclosed. Please clearly indicate grants that you have received in support of your research work. Clearly state if you received funds for covering the costs to publish in open access.}
+
+\authorcontributions{For research articles with several authors, a short paragraph specifying their individual contributions must be provided. The following statements should be used ``X.X. and Y.Y. conceived and designed the experiments; X.X. performed the experiments; X.X. and Y.Y. analyzed the data; W.W. contributed reagents/materials/analysis tools; Y.Y. wrote the paper.'' Authorship must be limited to those who have contributed substantially to the work reported.}
+
+\conflictsofinterest{The authors declare no conflict of interest. The founding sponsors had no role in the design of the study; in the collection, analyses, or interpretation of data; in the writing of the manuscript, and in the decision to publish the results.} 
+
+\externalbibliography{yes}
+\bibliography{biblio}
+
 \end{document}
