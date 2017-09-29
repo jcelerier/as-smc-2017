@@ -118,6 +118,33 @@ inscore
 
 -> refonte suite à tentative avec LibAudioStream
 
+\section{Orchestrated data}
+We first define the data we operate on. 
+External devices are modeled as a tree of optional parameters ; parameters can have values of common data types such as integer, float, etc.
+
+The tree of nodes is akin to the methods and containers described in the OSC specification.
+
+\begin{align*}
+\mathbf{Value} & = \mathrm{Float} \mid \mathrm{Int} \mid \mathrm{Bool} \mid \mathrm{String} \mid \dots \\
+\mathbf{ValueParameter} & = \mathrm{Value} \times \mathrm{Protocol} \\
+\mathbf{AudioParameter} & = \mathrm{Float[][]} \times \mathrm{Protocol} \\
+\mathbf{Parameter} & = \mathrm{ValueParameter} \mid \mathrm{AudioParameter} \\
+\mathbf{Node} & = \mathrm{String} \times \mathrm{Maybe}~\mathrm{Parameter} \times \mathrm{Node[]} 
+\end{align*}
+
+Parameters and nodes bear additional metadata which is not relevant to describe here: textual description, tags, etc.
+
+The parameters's associated values match the state of an external device: synthesizer, etc.
+Multiple protocols are implemented to allow this: for instance OSC, MIDI, etc.
+
+We define two core operations on parameters: 
+\begin{align*}
+\mathbf{pull} & : \mathrm{Parameter} \rightarrow \mathrm{Parameter} \\
+              & (v, p) \mapsto (v', p)~\text{where v' is the current value of the remote device}\\
+\mathbf{push} &: \mathrm{Parameter} \times \mathrm{Value} \rightarrow \mathrm{Parameter} \\
+              & (v, p), v' \mapsto (v', p)~\text{and v' is sent to the remote device} 
+\end{align*}
+
 \section{Temporal model}
 We note: $\tc$ for the temporal conditions, $\ic$ for the instantaneous conditions, $\itv$ for the intervals.
 chaining.
@@ -148,27 +175,29 @@ Two operations are defined on expressions and the data types that compose them:
 
 \begin{itemize}
     \item $\mathbf{update}: \mathrm{Expression} \rightarrow \mathrm{Expression}$. Used to reset any internal state and query up-to-date values for the expressions. For instance, $\mathbf{update}$ on an $\mathbf{Atom}$ fetches if possible new values for the parameters, why may include network requests.
-    \item $\mathbf{evaluate}: \mathrm{Expression} \rightarrow \mathrm{Bool}$. Performs the actual logical expression evaluation, according to the expected rules. %TODO spécifier correctement Pulse
+    
+    Precisely:
+    \[
+    \begin{cases}
+    \mathrm{update} : & \mathrm{Composition} \rightarrow \mathrm{Composition} \\ 
+    & (e_1, e_2, o) \mapsto (\mathrm{update}~e_1, \mathrm{update}~e_2, o) \\
+    \mathrm{update} : & \mathrm{Negation} \rightarrow \mathrm{Negation} \\
+    &  e_1 \mapsto \mathrm{update}~ e_1 \\
+    \mathrm{update} :&  \mathrm{Atom} \rightarrow \mathrm{Atom} \\
+    & \begin{cases}
+    (\mathrm{parameter}~p_1, \mathrm{parameter}~p_2, o) \mapsto (\mathrm{pull}~p_1, \mathrm{pull}~p_2, o) \\
+    (\mathrm{parameter}~p_1, \mathrm{value}~v_2, o) \mapsto (\mathrm{pull}~p_1, v_2, o) \\ 
+    \dots
+    \end{cases}\\
+    \mathrm{update} : & \mathrm{Impulse} \rightarrow \mathrm{Impulse} \\
+    & (p, b) \mapsto (p, \mathrm{false})
+    \end{cases}
+    \] 
+    
+    
+    
+    \item $\mathbf{evaluate}: \mathrm{Expression} \rightarrow \mathrm{Bool}$. Performs the actual logical expression evaluation, according to the expected logical rules. %TODO spécifier correctement Pulse
 \end{itemize}
-
-Precisely:
-\[
-\begin{cases}
-\mathrm{update} : & \mathrm{Composition} \rightarrow \mathrm{Composition} \\ 
-& (e_1, e_2, o) \mapsto (\mathrm{update}~e_1, \mathrm{update}~e_2, o) \\
-\mathrm{update} : & \mathrm{Negation} \rightarrow \mathrm{Negation} \\
-&  (e_1) \mapsto (\mathrm{update}~ e_1) \\
-\mathrm{update} :&  \mathrm{Atom} \rightarrow \mathrm{Atom} \\
-& \begin{cases}
-(p_1, p_2) \mapsto (\mathrm{pull}~p_1, \mathrm{pull}~p_2) \\
-(p_1, v_2) \mapsto (\mathrm{pull}~p_1, v_2) \\ 
-\dots
-\end{cases}\\
-\mathrm{update} : & \mathrm{Impulse} \rightarrow \mathrm{Impulse} \\
-& (p, b) \mapsto (p, \mathrm{false})
-\end{cases}
-\] 
-
 
 \begin{itemize}
     \item An atom is a comparison between two parameters, a parameter and a value, or two values.
@@ -191,7 +220,7 @@ An interval is said to be fixed when its min equals its max. It may be enabled o
 
 The time scale is not specified by the system: for instance, when working with audio data it may be better to use the audio sample as a base unit of time.
 But many applications don't use the audio rate: when working purely with visuals it may be better to use the screen refresh rate as time base in order not to 
-waste computer resources and energy.
+waste computer resources and energy. 
 
 \subsubsection{Instantaneous condition}
 Then, we want to be able to enable or disable events and intervals according to a condition, given in the expression language seen in \ref{sec.temporal.conditions}. An instantaneous condition is defined as follows: 
@@ -203,33 +232,55 @@ Then, we want to be able to enable or disable events and intervals according to 
 It is preceded and followed by a set of intervals.
 The most common case for an expression is to be true.
 
+Expressions are disabled either when they are false or when they are preceded by a non-null number of intervals, all of them already disabled through other conditions.; this propagates recursiveley to the following intervals and conditions. 
+
 
 \subsubsection{Temporal condition}
-A temporal condition
+A temporal condition is used to synchronize starts and ends of intervals, while allowing to implement behaviours such as : ``start part $B$ when the fader is at 0''.
+
+Asynchronicity: because if in a given tick we receive the successive messages: false, true, false, we want to be able to trigger even if the "last seen" message is "false".
+Thus the condition evaluation operates asynchronously; however, the actual triggering is synchronous.
 
 \subsubsection{Process}
 
 \subsubsection{Operations}
-
+% TODO ici on push en front, tandis qu'en C++ on push en back
 \begin{lstlisting}
-add_process interval process -> interval
+add_process interval proc: interval * proc -> interval
+ (t1, t2, p, t3) -> (t1, t2, proc::p, t3)
 \end{lstlisting}
 
 \begin{lstlisting}
-add_event sync
+add_event tc ic: TemporalCond * InstCond -> TemporalCond
+ (..., ics, ...) -> (..., ic::ics, ...)
 \end{lstlisting}
 
 exécution : 
 
 interval: 
+
 \begin{lstlisting}
-  tick: interval * t -> interval * state
-  \end{lstlisting}
+get_node graph node_id -> node
+update_node graph node_id node -> graph
+
+graph_fun: graph -> graph ; va transformer un noeud du graphe d'une maniere donnee
+
+tuple_first tpls: retourne les premiers elements d'une liste de paires
+tuple_second tpls: retourne les premiers elements d'une liste de paires
+
+tick: itv, count, offset : interval * duration * duration -> interval * graph_fun[]
+  ((..., nom, t, pos, procs), new_date) -> (
+  let procs = map procs (state _ t offset) in 
+    (..., t + count, t + count / nom, tuple_first procs ),  
+    fun (node_date,node_offset) -> (t+count, offset) :: tuple_second procs)
+\end{lstlisting}
 
 processes:
 \begin{lstlisting}
-  state: process * t -> process * state
-  \end{lstlisting}
+  state: process * t -> process * graph_fun
+  
+  described for each process (polymorphic)
+\end{lstlisting}
 
 \subsection{Temporal graph: scenario}
 
@@ -302,6 +353,15 @@ processes:
 \end{figure}
 
 \subsubsection{Creational operations}
+
+\begin{lstlisting}
+add_interval sc itv sev eev
+\end{lstlisting}
+\begin{lstlisting}
+add_sync sc
+\end{lstlisting}
+\subsubsection{Execution operations}
+
 \begin{lstlisting}
 state:
 \end{lstlisting}
@@ -309,15 +369,12 @@ state:
 \begin{lstlisting}
 process_event:
 \end{lstlisting}
-
-\subsubsection{Execution operations}
 \begin{lstlisting}
-add_interval sc itv sev eev
+make_happen:
 \end{lstlisting}
 \begin{lstlisting}
-add_sync sc
+make_dispose:
 \end{lstlisting}
-
 
 \subsection{Loop}
 Pbq: not introducing cycles in the temporal graph
@@ -345,9 +402,9 @@ connect graph node node edge
 \subsubsection{Sound input}
 \subsubsection{Mix}
 
-\subsubsection{Shader}
-\subsubsection{3D model}
-gltf ? 
+%\subsubsection{Shader}
+%\subsubsection{3D model}
+%gltf ? 
 
 \section{Combined model}
 \subsection{}
@@ -392,10 +449,11 @@ pour que par exemple la production d'un état dans un scénario entraîne une co
 => "third gen" audio sequencer.
 first gen: cubase, etc
 second gen: non-linear: ableton, bitwig
-third gen: i-score
+third gen: entirely interactive: i-score, iannix. what else ? 
 
 reproducibilité: code source dispo
 \section{Discussion}
+Enforcing graph constraints: mostly done through UI. For instance: ic are created on tc, etc. No "going back" which would break DAG-ness.
 \section{Conclusion}
 
 
