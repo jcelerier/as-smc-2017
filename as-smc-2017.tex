@@ -25,6 +25,7 @@
 \usepackage{listings}
 \usepackage{qtree}
 \usepackage{tkz-graph}  
+\usepackage{subcaption}
 \usetikzlibrary{shapes.geometric,positioning,fit,backgrounds}
 %=================================================================
 %% Please use the following mathematics environments: Theorem, Lemma, Corollary, Proposition, Characterization, Property, Problem, Example, ExamplesandDefinitions, Hypothesis, Remark, Definition
@@ -87,9 +88,11 @@ Many music software fit in one of three categories: sequencers, patchers, and te
 
 We propose in this paper a method that combines the sequencer and the patcher paradigm in a live system.  
 
-The general approach is as follows: we first define the temporal structure, which allows to position events and processes relatively to each other, hierarchically, and in a timely fashion. Then, we define a graph structure akin to dataflows, which is extended with special connection types to take into account the fact that nodes of the graph might not always be active at the same time. Both structures are then combined: the state of the temporal processes is bound to the dataflow nodes. This combination is then expanded with specific implicit cases that are relevant in computer music workflows. These cases are described using structures wrapping the temporal and dataflow graphs.
+The general approach is as follows: we first introduce a minimal model of the data we are operating on: namely, remote software or hardware such as OSC peripherals and sound cards. Then, two structures are presented: the first is a temporal structure, which allows to position events and processes relatively to each other, hierarchically, and in a timely fashion. The second is a graph structure akin to dataflows. This graph uses special connection types to take into account the fact that nodes of the graph might not always be active at the same time. Both structures are then combined: the state of the temporal processes is bound to the dataflow nodes. This combination is then expanded with specific implicit cases that are relevant in computer music workflows. These cases are described using structures wrapping the temporal and dataflow graphs. 
 
-The usage of the system is presented in example compositions: the first one is an example of audio editing, the second an interactive musical installation.
+We compare the various models in the context of music creation: what entails using only the temporal structure, only the graph structure, and the combination of both. 
+
+The latter model is shown to have enough expressive power to allow for recreation of common audio software logic within it: for instance traditional or looping audio sequencers. Additionnally, its use is presented in sample compositions: the first one is an example of audio editing, the second an interactive musical installation.
 
 % Ce qui manque: déclaration de variables locales pour nommage ? Actuellement on utilise des variables globales si on veut un nom.
 
@@ -119,7 +122,10 @@ inscore
 
 \section{Orchestrated data}
 We first define the data we operate on. 
-External devices are modeled as a tree of optional parameters ; parameters can have values of common data types such as integer, float, etc.
+External devices are modeled as a tree of optional parameters.
+
+Value parameters can have values of common data types such as integer, float, etc.
+Audio parameters are arrays that contain either the current input audio buffers of the sound card or the buffers that will be written to the sound card's output.
 
 The tree of nodes is akin to the methods and containers described in the OSC specification.
 
@@ -145,13 +151,89 @@ We define two core operations on parameters:
 \end{align*}
 
 \section{Temporal model}
-We note: $\tc$ for the temporal conditions, $\ic$ for the instantaneous conditions, $\itv$ for the intervals.
-chaining.
+The temporal model is two-fold: it is a hierarchical tree of processes, whose durations and execution times are directed by intervals. 
+The beginning and end of the intervals is subjected to various conditions that will be presented ; these conditions allow for various 
+interactive behaviours. Processes are any kind of relevant artistic process: automations, notes sequences, sound files. 
+In particular, specific dispositions of intervals and conditions are implemented as processes themselves, scenario and loop, which allows for hierarchy.
+
+We note: $\tc$ for temporal conditions, $\ic$ for instantaneous conditions, $\itv$ for intervals. 
+First, these elements are defined, then the semantics imposed on them by the scenario and the loop are presented.
+These semantics allow both serial and parallel execution.
+
 \subsection{Data types}
-process, interval, event, sync
+\begin{figure}
+    \centering
+    \begin{subfigure}[t!]{0.45\textwidth}
+        \centering
+        \small\def\qtreeunaryht{2ex}
+        \Tree [.interval
+        [.scenario 
+        [.interval~I_1 mapping ] 
+        [.interval~I_2 [.loop [.interval automation ] ] ] 
+        interval~I_3 
+        [.interval~I_4 sound ] 
+        [.interval~I_5 effect ]
+        ] 
+        !\qsetw{1mm}  automation sound  ]
+        \caption{Hierarchical tree}
+    \end{subfigure}
 
-
-
+    \begin{subfigure}[t!]{0.45\textwidth}
+        
+        \centering
+        \tikzstyle{VertexStyle}=[
+        shape=ellipse,
+        minimum width=6ex,
+        draw
+        ]
+        
+        \tikzstyle{EdgeStyle}=[
+        ->,
+        >=stealth'
+        ]
+        \tikzstyle{EditTimeSync}=[
+        rounded corners=.15cm, 
+        fill=gray!30, 
+        draw=gray, 
+        fill opacity=0.3
+        ]
+        \tikzstyle{WaitTimeSync}=[
+        rounded corners=.15cm, 
+        fill=orange!30, 
+        draw=orange, 
+        fill opacity=0.3
+        ]
+        
+        \begin{tikzpicture} 
+        \pgfdeclarelayer{box}
+        \pgfdeclarelayer{text}
+        \pgfsetlayers{box,text}
+        \begin{pgfonlayer}{text}
+        \SetGraphUnit{1.5} 
+        \Vertex[L=$\ic_1$]{C1} \EA[L=$\itv_1$](C1){I1} \EA[L=$\ic_2$](I1){C2} \EA[L=$\itv_4$](C2){I4}
+        \SO[L=$\ic_3$](C1){C3} \EA[L=$\itv_2$](C3){I2} \SOEA[L=$\ic_5$](I4){C5}
+        \SOEA[L=$\itv_3$](C3){I3} \EA[L=$\ic_4$](I3){C4} \EA[L=$\itv_5$](C4){I5}
+        
+        \Edges(C1, I1, C2, I4, C5)
+        \Edges(C3, I2, C2)
+        \Edges(C4, I5, C5)
+        \Edges(C3, I3, C4)
+        \end{pgfonlayer}
+        
+        \begin{pgfonlayer}{box}
+        \node[fit=(C1) (C3), EditTimeSync, label=above:$\tc_1$] {};
+        \node[fit=(C2), EditTimeSync, label=above:$\tc_2$] {};
+        \node[fit=(C4), EditTimeSync, label=above:$\tc_3$] {};
+        \node[fit=(C5), EditTimeSync, label=above:$\tc_4$] {};
+        \end{pgfonlayer}
+        \end{tikzpicture}
+        
+        \caption{Temporal DAG}
+    \end{subfigure}
+\end{figure}
+% TODO représenter trace d'exécution
+    
+    
 \subsubsection{Conditions and expressions}
 
 We first define the conditional operations we want to be able to express.
@@ -192,10 +274,9 @@ Two operations are defined on expressions and the data types that compose them:
     & (p, b) \mapsto (p, \mathrm{false})
     \end{cases}
     \] 
-    
-    
-    
-    \item $\mathbf{evaluate}: \mathrm{Expression} \rightarrow \mathrm{Bool}$. Performs the actual logical expression evaluation, according to the expected logical rules. %TODO spécifier correctement Pulse
+        
+    \item $\mathbf{evaluate}: \mathrm{Expression} \rightarrow \mathrm{Bool}$. Performs the actual logical expression evaluation, according to the expected logical rules.
+     % TODO spécifier correctement Pulse
 \end{itemize}
 
 \begin{itemize}
@@ -229,10 +310,8 @@ Then, we want to be able to enable or disable events and intervals according to 
 \]
 
 It is preceded and followed by a set of intervals.
-The most common case for an expression is to be true.
 
-Expressions are disabled either when they are false or when they are preceded by a non-null number of intervals, all of them already disabled through other conditions.; this propagates recursiveley to the following intervals and conditions. 
-
+Expressions are disabled either when they are false or when they are preceded by a non-null number of intervals, all of them already disabled through other conditions. This propagates recursiveley to the following intervals and conditions. 
 
 \subsubsection{Temporal condition}
 A temporal condition is used to synchronize starts and ends of intervals, while allowing to implement behaviours such as : ``start part $B$ when the fader is at 0''.
@@ -283,73 +362,6 @@ processes:
 
 \subsection{Temporal graph: scenario}
 
-\begin{figure}[h]
-    \centering
-    \small\def\qtreeunaryht{2ex}
-    \Tree [.interval
-    [.scenario 
-    [.interval~I_1 mapping ] 
-    [.interval~I_2 [.loop [.interval automation ] ] ] 
-    interval~I_3 
-    [.interval~I_4 sound ] 
-    [.interval~I_5 effect ]
-    ] 
-    !\qsetw{1mm}  automation sound  ]
-    \caption{Hierarchical tree}
-\end{figure}
-% TODO représenter trace d'exécution
-\begin{figure}[h]
-    \centering
-    
-    \tikzstyle{VertexStyle}=[
-    shape=ellipse,
-    minimum width=6ex,
-    draw
-    ]
-    
-    \tikzstyle{EdgeStyle}=[
-    ->,
-    >=stealth'
-    ]
-    \tikzstyle{EditTimeSync}=[
-    rounded corners=.15cm, 
-    fill=gray!30, 
-    draw=gray, 
-    fill opacity=0.3
-    ]
-    \tikzstyle{WaitTimeSync}=[
-    rounded corners=.15cm, 
-    fill=orange!30, 
-    draw=orange, 
-    fill opacity=0.3
-    ]
-    
-    \begin{tikzpicture} 
-    \pgfdeclarelayer{box}
-    \pgfdeclarelayer{text}
-    \pgfsetlayers{box,text}
-    \begin{pgfonlayer}{text}
-    \SetGraphUnit{1.5} 
-    \Vertex[L=$\ic_1$]{C1} \EA[L=$\itv_1$](C1){I1} \EA[L=$\ic_2$](I1){C2} \EA[L=$\itv_4$](C2){I4}
-    \SO[L=$\ic_3$](C1){C3} \EA[L=$\itv_2$](C3){I2} \SOEA[L=$\ic_5$](I4){C5}
-    \SOEA[L=$\itv_3$](C3){I3} \EA[L=$\ic_4$](I3){C4} \EA[L=$\itv_5$](C4){I5}
-    
-    \Edges(C1, I1, C2, I4, C5)
-    \Edges(C3, I2, C2)
-    \Edges(C4, I5, C5)
-    \Edges(C3, I3, C4)
-    \end{pgfonlayer}
-    
-    \begin{pgfonlayer}{box}
-    \node[fit=(C1) (C3), EditTimeSync, label=above:$\tc_1$] {};
-    \node[fit=(C2), EditTimeSync, label=above:$\tc_2$] {};
-    \node[fit=(C4), EditTimeSync, label=above:$\tc_3$] {};
-    \node[fit=(C5), EditTimeSync, label=above:$\tc_4$] {};
-    \end{pgfonlayer}
-    \end{tikzpicture}
-    
-    \caption{Temporal DAG}
-\end{figure}
 
 \subsubsection{Creational operations}
 
@@ -409,6 +421,8 @@ connect graph node node edge
 \subsection{}
 
 \section{Proposed sequencer behaviour}
+Conditions et cie: The most common case for an expression is to be true.
+
 UI: création automatique de liens implicites des enfants vers les parents
 => "cable créé par défaut" quand on rajoute un processus dont on marque l'entrée
 
@@ -440,9 +454,65 @@ pour que par exemple la production d'un état dans un scénario entraîne une co
 \section{Applications}
 - Exemple article Myriam: micro-montage et sélection d'effets
 - Carrousel
+-> Réutilisation et filtrage des données d'entrées
+-> Gammes\\
+
 \section{Evaluation}
+\subsection{Reconstructing existing paradigms}
+In this part we give example of reconstruction of standard audio software behaviours with the given model.
+\subsubsection{Audio sequencer}
+Notable software in this category includes Steinberg Cubase, Avid Pro Tools, \dots
+
+The common metaphor for audio sequencers is the track, inspired from mixing desks and tape recorders. 
+We will take the example of audio and midi tracks. 
+Such an audio sequencer can be modeled by : 
+
+\begin{itemize}
+    \item A root: an infinite interval.
+    \item This interval contains two processes: a scenario and an effect bus. 
+    The sound output of the scenario goes to the input of the effect bus.
+    \item The scenario contains the actual tracks.
+    \item These tracks are also modeled by infinite constraints.
+\end{itemize}
+
+We divide the tracks in two categories.
+Audio tracks are built with : 
+\begin{itemize}
+  \item A scenario with a single sequence of intervals, some of which may bear sound file processes and others being empty.
+  \item An effect bus process. The output of the scenario goes to the input of the effect bus. Generally, this effect bus would end by channel operations such as panning and volume adjustment, in a similar fashion to mixing desks.
+\end{itemize} 
+
+Midi tracks are built with : 
+\begin{itemize}
+    \item A scenario with a single sequence of intervals, some of which may bear MIDI notes processes and others being empty.
+    \item An instrument process, which takes MIDI data and outputs sound.
+    \item Like before, an effect bus applied to the instrument's output.
+\end{itemize}
+
+This can easily be extended with further features: sends, automations, etc.
+\subsubsection{Looping audio sequencer}
+More recently, a different kind of sequencer has emerged: the looping, non-linear sequencer. 
+The prime exemple of this is Ableton Live. We give the example for a simplified model of live-looping without quantization.
+
+These sequencers are also organized in tracks ; however, within a track, the musician can choose a single loop 
+that is currently playing, and regularly switch the current loop.
+
+Hence, the general organization stays the same than for the audio sequencer: most importantly, the way effect buses are applied does not change.
+
+\begin{itemize}
+    \item Each clip of a track is given an index. 
+    \item Each track also has a parameter which is the next clip to play, \lstinline|next_clip|. These parameters can be introduced as variables in the device tree.
+    \item We replace the scenarios containing the actual sound files or midi notes by loop processes. 
+    \item The loops processes are defined with and ending temporal condition. 
+    \item Inside the loop pattern, there is a single scenario process. This scenario process has a set of parallel intervals, each with one sound file. Every interval begins with an instantaneous condition that compares the \lstinline|next_clip| parameter to the current clip's index. Hence, at most one clip is playing at the same time in each track. If the \lstinline|next_clip| does not change the track keeps looping on the sound file.
+\end{itemize}
+
+Extension: par ex. dans une boucle on peut mettre un autre scénario.
+Pb : tic qui manque. On peut y remédier en exécutant le trigger "en avance".
+\subsubsection{Patcher}
+
+
 \subsection{Notes on implementation}
-- Recréation séquenceur traditionnel, patcher, et ableton live (vue session).
 
 
 => "third gen" audio sequencer.
@@ -453,8 +523,16 @@ third gen: entirely interactive: i-score, iannix. what else ?
 reproducibilité: code source dispo
 \section{Discussion}
 Enforcing graph constraints: mostly done through UI. For instance: ic are created on tc, etc. No "going back" which would break DAG-ness.
+
+Faire parenthèse sur domain driven design sur logiciels de musique qui fournit de meilleurs résultats que application directe de modèles existants (petri, etc).
+Peut-être donner un méta-modèle qui correspond à nos structures ?
+
+Dire pourquoi un tic est introduit lors d'une interaction (notamment, permet de ne pas avoir de "boucle infinie" si on a une boucle de durée 0 avec deux triggers vrais) ; est aussi plus cohérent pour les utilisateurs pour qui une interaction doit être manifeste.
+
+Avantage: manipulation uniforme des processus, que ce soit des automations, des groupes, des fichiers sons, etc.
 \section{Conclusion}
 
+missing: quantification
 
 \supplementary{The following are available online at www.mdpi.com/link, Figure S1: title, Table S1: title, Video S1: title.}
 
