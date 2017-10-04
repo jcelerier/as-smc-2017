@@ -319,7 +319,6 @@ A temporal condition is used to synchronize starts and ends of intervals, while 
 Asynchronicity: because if in a given tick we receive the successive messages: false, true, false, we want to be able to trigger even if the "last seen" message is "false".
 Thus the condition evaluation operates asynchronously; however, the actual triggering is synchronous.
 
-\subsubsection{Process}
 
 \subsubsection{Operations}
 % TODO ici on push en front, tandis qu'en C++ on push en back
@@ -337,6 +336,7 @@ exécution :
 
 interval: 
 
+On retourne une fonction ... \lstinline|graph_fun| va être appliquée au graph. Faut-il avoir une liste explicite ou bien juste passer le graph et demander à chaque fonction d'appliquer ses fonctions enfants ? Le second fait plus fonctionnel mais le premier laisse moins de marge d'erreur (DRY)
 \begin{lstlisting}
 get_node graph node_id -> node
 update_node graph node_id node -> graph
@@ -351,6 +351,7 @@ tick: itv, count, offset : interval * duration * duration -> interval * graph_fu
   let procs = map procs (state _ t offset) in 
     (..., t + count, t + count / nom, tuple_first procs ),  
     fun (node_date,node_offset) -> (t+count, offset) :: tuple_second procs)
+
 \end{lstlisting}
 
 processes:
@@ -374,10 +375,6 @@ add_sync sc
 \subsubsection{Execution operations}
 
 \begin{lstlisting}
-state:
-\end{lstlisting}
-
-\begin{lstlisting}
 process_event:
 \end{lstlisting}
 \begin{lstlisting}
@@ -387,38 +384,170 @@ make_happen:
 make_dispose:
 \end{lstlisting}
 
+\begin{lstlisting}
+scenario_state : scenario -> scenario * state
+\end{lstlisting}
+
 \subsection{Loop}
 Pbq: not introducing cycles in the temporal graph
+\begin{lstlisting}
+process_event:
+\end{lstlisting}
+\begin{lstlisting}
+make_happen:
+\end{lstlisting}
+\begin{lstlisting}
+make_dispose:
+\end{lstlisting}
+\begin{lstlisting}
+loop_state:
+\end{lstlisting}
 \section{Data model}
 => set date
 => set offset pour offset audio (p-ê pas nécessaire si on fait comme LAStream)
 
-\subsection{Data types}
+\section{Data graph}
+Questions: 
+* node ordering
+* port definitions
+
+\subsection{Structures}
 
 \begin{lstlisting}
+node: enabled * executed * time * position * inlets * outlets * priority
 add_node graph 
 connect graph node node edge
+enable graph node
+disable graph node
+
 \end{lstlisting}
 \subsection{Operations}
-\subsection{Data graph}
+Input mix on each port
+
+\begin{lstlisting}
+copy_from_global
+copy_from_local
+init_node
+teardown_node
+
+
+\end{lstlisting} 
+
+
+\subsection{Tick description}
+
+General flow: 
+
+disable strict nodes
+
+sort remaining nodes according to the custom order chosen (default, temporal, custom)
+
+priority: 
+* explicit cables
+* local or global address
+
+do a tick: 
+
+\begin{lstlisting}
+let clear_outputs n = 
+  (_, ..., (map n.outputs (match p with 
+  | value -> clear value
+  | audio -> clear audio
+))
+
+let pull_port p : port -> port 
+
+init_value : port -> value
+let init_value value_port = 
+  if !empty value_port.cables
+    mix (pull_port value_port.cables)
+  pull value_port.address
+
+
+let init_node g n = 
+  (_, (map n.inputs (match p with 
+    | value -> pull value
+  )), ...) 
+exec_node: 
+   in
+  let copy_inputs n = 
+  let init_node n = 
+    copy_inputs clear_outputs n      
+  in 
+  
+  new_node, new_local_state = exec_node init_node n
+  replace g n new_node 
+    
+tick_graph: 
+  while: ! empty nodes 
+  
+\end{lstlisting}
+
+
+
 \subsection{Data nodes}
 \subsubsection{Passthrough}
 -> used for scenario and interval
+-> mixing at the input
+
 
 \subsubsection{Automation}
-\subsubsection{Mapping}
-\subsubsection{JavaScript}
-\subsubsection{Piano Roll}
-\subsubsection{Sound file}
-\subsubsection{Sound input}
-\subsubsection{Mix}
+\paragraph{Curves}
+start point + set of (segment * breakpoint)
 
+curve + message output port
+$x\in[0;1]$ -> in the nominal duration of the parent time interval.
+
+\begin{lstlisting}
+state_autom :
+\end{lstlisting}
+\subsubsection{Mapping}
+message input port + curve + message output port
+\begin{lstlisting}
+state_mapping :
+\end{lstlisting}
+\subsubsection{JavaScript}
+n message input port + curve + n message output port
+\begin{lstlisting}
+state_js :
+\end{lstlisting}
+\subsubsection{Piano Roll}
+notes + midi output port
+\begin{lstlisting}
+state_midi :
+\end{lstlisting}
+\subsubsection{Sound file}
+sound data + midi output port
+\begin{lstlisting}
+state_sndfile :
+\end{lstlisting}
+\subsubsection{Buffer}
+Used to keep audio input in memory
+
+Why isn't the delay cable not enough ? can't go backwards. 
+pb: pauser au milieu: coupure. cas dans les boucles: on réécrit par dessus (buffer vidé sur start).
+\begin{lstlisting}
+state_buffer :
+\end{lstlisting}
 %\subsubsection{Shader}
 %\subsubsection{3D model}
 %gltf ? 
 
 \section{Combined model}
-\subsection{}
+-> on ajoute node aux tc
+
+-> nodeprocess fait le lien entre graphnode et time process, permet de faire l'activation et l'écoulement du temps
+
+-> offset nécessaire pour tc pour gérer l'audio (mais pourrait être ajouté dans le modèle de base. Ou bien passer une paire de pointeurs.. ? )
+
+\subsection{Combined tick}
+Exécution complète d'un tick: 
+Copy audio buffers and input data, execute the temporal tick, execute the graph tick, copy the output audio buffer and apply the produced state by pushing the values.
+
+Pour être propre, il faudrait faire un "pull" général au début...
+\begin{figure}
+	\caption{General data flow for a tick}
+\end{figure}
 
 \section{Proposed sequencer behaviour}
 Conditions et cie: The most common case for an expression is to be true.
@@ -441,23 +570,13 @@ Choix pour multicanal: faire comme jamoma avec objets tilde
 => sliders et dispatching de canaux ?
 => cables: rubberband ? il faut mettre un rubberband dès qu'on a une entrée et une sortie qui n'ont pas la même vitesse relative. Dire que pour les automations ça interpole de manière naturelle avec le ralentissement et l'accélération (on sépare vitesse et granularité)
 
-Exécution complète d'un tick: 
-
-- Copie des buffers audio
-- Exécution du tick temporel
-- Récupération des states
 
 - Dire qu'on pourrait affiner en combinant plus précisément les "sous-ticks" temporels et de données
 pour que par exemple la production d'un état dans un scénario entraîne une condition dans un autre scénario
 
 
-\section{Applications}
-- Exemple article Myriam: micro-montage et sélection d'effets
-- Carrousel
--> Réutilisation et filtrage des données d'entrées
--> Gammes\\
+\section{Applications and examples}
 
-\section{Evaluation}
 \subsection{Reconstructing existing paradigms}
 In this part we give example of reconstruction of standard audio software behaviours with the given model.
 \subsubsection{Audio sequencer}
@@ -512,6 +631,11 @@ Pb : tic qui manque. On peut y remédier en exécutant le trigger "en avance".
 \subsubsection{Patcher}
 
 
+\subsection{Musical examples}
+- Exemple article : micro-montage et sélection d'effets
+- Carrousel
+-> Réutilisation et filtrage des données d'entrées
+-> Gammes\\
 \subsection{Notes on implementation}
 
 
@@ -521,7 +645,7 @@ second gen: non-linear: ableton, bitwig
 third gen: entirely interactive: i-score, iannix. what else ? 
 
 reproducibilité: code source dispo
-\section{Discussion}
+\section{Evaluation and Discussion}
 Enforcing graph constraints: mostly done through UI. For instance: ic are created on tc, etc. No "going back" which would break DAG-ness.
 
 Faire parenthèse sur domain driven design sur logiciels de musique qui fournit de meilleurs résultats que application directe de modèles existants (petri, etc).
