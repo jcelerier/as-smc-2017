@@ -107,6 +107,33 @@ The latter model is shown to have enough expressive power to allow for recreatio
 % Sample accuracy pour audio ? on pourrait faire un tick par échantillon au prix de la performance. Mais pb avec PureData, etc. qui veulent 64 samples: il faudrait un mécanisme de buffering...
 % Changements de vitesse: introduire des noeuds de "rescaling"  dès qu'on a deux objets qui sont en relation et peuvent avoir une vitesse différente. eg deux processus 
 \subsection{State of the art}
+
+There is a long-standing interest in the handling of time in programming languages, which is intrinsically linked to how the language handles dynamicity.
+
+PEARL90\cite{halang2001safe}\footnote{Not to be mistaken with the Perl language commonly used for text processing} provides temporal primitives allowing for instance to perform loops at a given rate for a given amount of time.
+More recently, Céu has been introduced as a synchronous language with temporal operators, and applications to multimedia\cite{Santos:2016:CLI:2976796.2976856}.
+
+OpenMusic is a visual environment which allows to write music by functional composition.
+It has been recently extended with timed sequences allowing to specify evolutions of parameters in time\cite{garcia:hal-01484077}.
+
+Likewise, the Bach library for Max~\cite{agostini2015max} allows to define temporal variations of parameters during the playing of a note by with the mechanism of slots.
+The processes controlled by such parameters are then available to use in the Max patch.
+
+The Max for Live extension to Ableton Live allows to embed Max patches in the Ableton Live sequencer. 
+Through the API provided, one can control the execution of various elements of the sequencer in Max; automations in Live can also be used to send data to Max patches at a given time.
+
+A method for dynamic patching of Max abstractions based on CommonLisp has been proposed by Thomas Hummel\cite{hummel1994common} to reduce resource usage by enabling and disabling sub-patches at different points in the execution of a program.
+This has the advantage of saving computing power for the active elements of the score.
+
+Dataflows and especially synchronous dataflows have seen tremendous usage in the music and signal processing community. 
+A list of patterns commonly used when developing dataflow-based music software is presented in~\cite{arumi2006dataflow}.
+Formal semantics are given in~\cite{benveniste_data-flow_1993}.
+Specific implementation aspects of dataflow systems are discussed in the Handbook of Signal Processing Systems\cite{bhattacharyya_handbook_2013}. 
+
+Dynamicity in dataflows is generally separated in two independent aspects: dynamicity of the data, and of the topology.
+The first relates to the variability on the streams of tokens, while the second is about changes to the structure of the graph. 
+Boolean parametric dataflows\cite{bempelis2015boolean} have been proposed to solve dynamicity of topology, by introducing conditionals at the edges.
+
 base: max, pd, séquenceurs: cubase/protools , live/bitwig...
 
 openmusic
@@ -115,13 +142,15 @@ antescofo
 
 inscore
 
-\subsection{Relationship with i-score}
--> formalisation du papier icmc
 
--> refonte suite à tentative avec LibAudioStream
+\subsection{Context of this research}
+This paper follows existing research on interactive scores, as part of the i-score project.
+Previous research focused on operational semantics for interactive scores, based on time automatas\cite{} or Petri nets\cite{}, mainly for software verification purposes. 
+In contrast, we give here domain-centered functional semantics which models the current C++ implementation of the software.
 
+\cite{celerier2017icmc}
 \section{Orchestrated data}
-We first define the data we operate on. 
+We first define the data we operate on.
 External devices are modeled as a tree of optional parameters.
 
 Value parameters can have values of common data types such as integer, float, etc.
@@ -321,6 +350,39 @@ Thus the condition evaluation operates asynchronously; however, the actual trigg
 
 
 \subsubsection{Operations}
+\begin{lstlisting}
+
+
+type process = 
+NodeProcess of nodeProcess | Scenario of scenario | Loop of loop
+and interval = {
+minDuration:duration;
+maxDuration : duration option;
+nominalDuration : duration;
+itvStatus: status;
+processes: process list
+}
+and condition = { 
+condExpr: expression; 
+previousItv: interval list; 
+nextItv: interval list; 
+status: status; 
+}
+and temporalCondition = { 
+syncExpr: expression; 
+conds: condition list
+}
+and scenario = { 
+intervals: interval list ; 
+triggers: temporalCondition list; 
+}
+and loop = { 
+pattern: interval; 
+startTrig: temporalCondition;
+endTrig: temporalCondition; 
+};;
+
+\end{lstlisting}
 % TODO ici on push en front, tandis qu'en C++ on push en back
 \begin{lstlisting}
 add_process interval proc: interval * proc -> interval
@@ -411,9 +473,94 @@ Questions:
 * node ordering
 * port definitions
 
+\begin{lstlisting}
+
+(* ports *)
+type edgeType = Glutton | Strict | Delayed ;;
+type edge = { edgeId: int; source: int; sink: int; edgeType: edgeType; } 
+and audioPort = { audioPortId: int; audioPortAddr: audioParameter option; audioEdges: edge list } 
+and valuePort = { valuePortId: int; valuePortAddr: valueParameter option; valueEdges: edge list } 
+and port = AudioPort of audioPort | ValuePort of valuePort
+;;
+
+\end{lstlisting}
+
 \subsection{Structures}
 
 \begin{lstlisting}
+
+(* curves *)
+type curve = (float * float) list ;;
+let value_at curve x = 0.0;;
+
+(* some processes *)
+type automation = valuePort * curve;;
+type mapping = valuePort * valuePort * curve;;
+type sound = audioPort * float array array;;
+type passthrough = audioPort * valuePort * audioPort * valuePort;;
+
+type dataNode = Automation of automation | Mapping of mapping | Sound of sound | Passthrough of passthrough ;;
+type grNode = { nodeId: int; data: dataNode; enabled: bool; date: duration; position: position; };;
+
+
+type graph = { nodes: grNode list ; edges: edge list; };;
+
+let next_id lst f = 1 + (List.fold_left max 0 (List.map f lst));;
+let next_node_id lst = next_id lst (fun n -> n.nodeId);;
+let next_edge_id lst = next_id lst (fun n -> n.edgeId);;
+
+let create_audio_port = { audioPortId = 0; audioPortAddr = None; audioEdges = []; } ;;
+let create_value_port = { valuePortId = 0; valuePortAddr = None; valueEdges = []; } ;;
+let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
+let some_sound_data = Array.make 2 (Array.make 8 0.);; 
+let some_sound = Sound (create_audio_port, some_sound_data);;
+
+let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
+
+(* test *)
+let test_node_1 = { nodeId = 1; data = some_sound; enabled = false; date = 0; position = 0. };;
+let test_node_2 = { nodeId = 34; data = some_sound; enabled = false; date = 0; position = 0. };;
+next_node_id [ test_node_1; test_node_2 ] ;;   
+
+let create_graph = { nodes = []; edges = [] };;
+let add_node gr nodeDat = 
+let new_id = next_node_id gr.nodes in 
+let newNodeDat = match nodeDat with 
+| Automation a -> nodeDat
+| Mapping m -> nodeDat
+| Sound s -> nodeDat
+| Passthrough p -> nodeDat
+in
+let new_node = { nodeId = new_id; data = newNodeDat; enabled = false; date = 0; position = 0. } in
+(new_node, {nodes = new_node::gr.nodes; edges = gr.edges})
+;;
+let add_edge gr src snk t = 
+let new_id = next_edge_id gr.edges in 
+let new_edge = { edgeId = new_id; source = src; sink = snk; edgeType = t } in 
+(new_edge, { nodes = gr.nodes; edges = new_edge::gr.edges })
+;;
+
+(* test *)
+let test_g = create_graph;;
+let (snd1, test_g) = add_node test_g some_sound;;
+let (snd2, test_g) = add_node test_g some_sound;;
+let (p1, test_g) = add_node test_g some_passthrough;;
+
+(* let (e1, test_g) = add_edge snd1. *)
+
+
+type nodeProcess = { 
+node: int; 
+curTime: duration; 
+curOffset: duration;
+curPos: position;    
+};;
+
+
+
+
+
+
 node: enabled * executed * time * position * inlets * outlets * priority
 add_node graph 
 connect graph node node edge
@@ -559,7 +706,7 @@ UI: création automatique de liens implicites des enfants vers les parents
 => création d'objets récursivement, etc
 
 - Problème des states dans scénario ?
-=> states du scénario: comment interviennent-ils ? faire un scénario fantôme *
+=> states du scénario: comment interviennent-ils ? faire un scénario fantôme 
 
 
 - Mettre l'accent sur la recréation de la sémantique de i-score à partir du graphe: 
@@ -632,10 +779,35 @@ Pb : tic qui manque. On peut y remédier en exécutant le trigger "en avance".
 
 
 \subsection{Musical examples}
-- Exemple article : micro-montage et sélection d'effets
-- Carrousel
--> Réutilisation et filtrage des données d'entrées
--> Gammes\\
+\subsubsection{Audio compositing}
+-> on utilise un scénario qui lit des parties d'une entrée son dans différents bus d'effets. L'effet peut se déclencher en retard.
+
+Org: 
+
+Intervalle racine
+
+Process 1:  Audio input
+Process 2 : Scenario
+  -> Trois itv ; entrée reliée strict à sortie de audio input ; sortie dans parent
+  
+Process 3 : FX
+Process 4 : scenario
+Audio Input -> itv {1,2,3} -> scenario -> fx -> scenario
+
+\subsubsection{Musical carousel}
+We present here a real-world interactive music example: the musical carousel.
+Each seat on the carousel has different instrument-like input devices: reactive pads, motion sensors, etc.
+A run in the carousel generally operates as follows: 
+
+\begin{itemize}
+    \item The first few seconds, the rules of the carousel are explained to the participants.
+    \item The song starts: the passengers can start interacting with their instruments. An overall music is generated from their interpretation. Played notes stay in predefinite scales which may vary over time; pre-recorded parts can also be layered on top. The overall song structure can vary according to the intensity of the played music: for instance, if everyone plays \textit{piano}, different instruments may become available in the next section of the song, a part may be shorter or longer, etc. Such variations are written by the composer for each song.
+    \item At the end of the song, the participants hear a summarized version of the song they just played. This version also has additional corrections and adjustments applied algorithmically.
+\end{itemize}
+
+- Réutilisation des données d'entrée: scores sur certaines parties ; réutilisation de certaines notes et des pics d'intensité -> nécessite d/dx
+- Gammes: filtrage global du MIDI In
+
 \subsection{Notes on implementation}
 
 
@@ -657,6 +829,8 @@ Avantage: manipulation uniforme des processus, que ce soit des automations, des 
 \section{Conclusion}
 
 missing: quantification
+
+missing: sound speed
 
 \supplementary{The following are available online at www.mdpi.com/link, Figure S1: title, Table S1: title, Video S1: title.}
 
