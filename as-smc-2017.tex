@@ -80,6 +80,7 @@
 \DeclareMathOperator{\tc}{TC}
 \DeclareMathOperator{\ic}{IC}
 \DeclareMathOperator{\itv}{I}
+\DeclareMathOperator{\proc}{P}
 \title{A model for interactive media authoring}
 \begin{document}
 
@@ -145,11 +146,15 @@ inscore
 
 \subsection{Context of this research}
 This paper follows existing research on interactive scores, as part of the i-score project.
-Previous research focused on operational semantics for interactive scores, based on time automatas\cite{} or Petri nets\cite{}, mainly for software verification purposes. 
+Previous research focused on operational semantics for interactive scores, based on time automatas\cite{arias2016authoring} or Petri nets\cite{allombert2007system}, mainly for software verification purposes. 
 In contrast, we give here domain-centered functional semantics which models the current C++ implementation of the software.
 
+We first define the temporal model, then extend it with a distinct data model which reads and produces the various inputs \& outputs of the system. 
+Then, we introduce implicit operations and defaults in the context of a GUI software to create, modify, and playback such scores. These operations allow to simplify the usage of the paradigm for composers.
+Real-world examples are provided and discussed.
+
 \cite{celerier2017icmc}
-\section{Orchestrated data}
+\section{Orchestrated data}\label{sec.device}
 We first define the data we operate on.
 External devices are modeled as a tree of optional parameters.
 
@@ -174,20 +179,20 @@ Multiple protocols are implemented to allow this: for instance OSC, MIDI, etc.
 We define two core operations on parameters: 
 \begin{align*}
 \mathbf{pull} & : \mathrm{Parameter} \rightarrow \mathrm{Parameter} \\
-              & (v, p) \mapsto (v', p)~\text{where v' is the current value of the remote device}\\
+              & (v, p) \mapsto (v', p)~\text{where v' is the last known value in the remote device}\\
 \mathbf{push} &: \mathrm{Parameter} \times \mathrm{Value} \rightarrow \mathrm{Parameter} \\
               & (v, p), v' \mapsto (v', p)~\text{and v' is sent to the remote device} 
 \end{align*}
 
 \section{Temporal model}
-The temporal model is two-fold: it is a hierarchical tree of processes, whose durations and execution times are directed by intervals. 
+The temporal model is twofold: it is a hierarchical tree of processes, whose durations and execution times are directed by intervals. 
 The beginning and end of the intervals is subjected to various conditions that will be presented ; these conditions allow for various 
 interactive behaviours. Processes are any kind of relevant artistic process: automations, notes sequences, sound files. 
 In particular, specific dispositions of intervals and conditions are implemented as processes themselves, scenario and loop, which allows for hierarchy.
 
-We note: $\tc$ for temporal conditions, $\ic$ for instantaneous conditions, $\itv$ for intervals. 
+We note: $\tc$ for temporal conditions, $\ic$ for instantaneous conditions, $\itv$ for intervals, $\proc$ for processes. 
 First, these elements are defined, then the semantics imposed on them by the scenario and the loop are presented.
-These semantics allow both serial and parallel execution.
+These semantics allow both serial and parallel execution of musical processes.
 
 \subsection{Data types}
 \begin{figure}
@@ -264,11 +269,10 @@ These semantics allow both serial and parallel execution.
     
     
 \subsubsection{Conditions and expressions}
-
 We first define the conditional operations we want to be able to express.
 We restrain ourselves to simple propositional logic operands: \textbf{and}, \textbf{or}, \textbf{not}.
 
-Expressions operate on addresses and values of the device tree presented in chap.~\ref{chap.control}, according to the grammar in \ref{fig.expr.grammar}.
+Expressions operate on addresses and values of the device tree presented in \ref{sec.device}.
 
 Formally, expressions are defined as a tree:
 Let \textbf{Comparator} be an identifier for standard value comparison operations: $<, \leq, >, \geq, =, \neq$ and \textbf{Operator} standard logical operators \textbf{and} \&  \textbf{or}.
@@ -311,9 +315,20 @@ Two operations are defined on expressions and the data types that compose them:
 \begin{itemize}
     \item An atom is a comparison between two parameters, a parameter and a value, or two values.
     \item Negations and compositions are the traditional predicate logic building blocks.
-    \item We introduce a specific operator, ``impulse'', which allows to decide whether a value was received.
+    \item We introduce a specific operator, ``impulse'', which allows to decide whether a message was received in a given time span.
 \end{itemize}
 
+\subsubsection{Temporal processes}
+Temporal processes are executed by intervals at each tick. 
+The actual processes will be defined in sections~, \ref{sec.scenario}, \ref{sec.loop}, \ref{sec.datamodel}.
+
+A process is a type $\proc$ associated with the following operations: 
+\begin{align*}
+\mathbf{start}&: \proc \rightarrow \proc \\
+\mathbf{stop}&: \proc \rightarrow \proc \\
+\mathbf{tick}&: \proc * \mathbb{Z} * \mathbb{Z} * \mathbb{R} \rightarrow P\\
+\mathbf{Process}&: \mathrm{Scenario} \mid \mathrm{Loop} \mid  \dots
+\end{align*}
 \subsubsection{Interval}
 We want to be able to express the passing of time, for a given duration.
 This duration may or may not be finite.
@@ -343,11 +358,13 @@ It is preceded and followed by a set of intervals.
 Expressions are disabled either when they are false or when they are preceded by a non-null number of intervals, all of them already disabled through other conditions. This propagates recursiveley to the following intervals and conditions. 
 
 \subsubsection{Temporal condition}
-A temporal condition is used to synchronize starts and ends of intervals, while allowing to implement behaviours such as : ``start part $B$ when the fader is at 0''.
+A temporal condition is used to synchronize starts and ends of intervals, while allowing to implement behaviours such as : ``start the chorus when the fader is at 0''.
 
-Asynchronicity: because if in a given tick we receive the successive messages: false, true, false, we want to be able to trigger even if the "last seen" message is "false".
-Thus the condition evaluation operates asynchronously; however, the actual triggering is synchronous.
+Temporal conditions carry instantaneous conditions, which will be evaluated at the moment where the temporal condition becomes true.
 
+\paragraph{A note on asynchronicity}
+We consider here a synchronous version of the temporal conditions, which assumes that external values would not variate at a greater rate than the tick rate of the system; in practice this is generally not the case. Hence, the actual implementation of temporal conditions supports asynchronous updates of the condition value according to received network messages rather than the tick rate. 
+This means that the execution will not miss cases where a condition would become false, true, then false again after the beginning and before the end of a tick.
 
 \subsubsection{Operations}
 \begin{lstlisting}
@@ -423,7 +440,7 @@ processes:
   described for each process (polymorphic)
 \end{lstlisting}
 
-\subsection{Temporal graph: scenario}
+\subsection{Temporal graph: scenario}\label{sec.scenario}
 
 
 \subsubsection{Creational operations}
@@ -450,7 +467,7 @@ make_dispose:
 scenario_state : scenario -> scenario * state
 \end{lstlisting}
 
-\subsection{Loop}
+\subsection{Loop}\label{sec.loop}
 Pbq: not introducing cycles in the temporal graph
 \begin{lstlisting}
 process_event:
@@ -464,7 +481,7 @@ make_dispose:
 \begin{lstlisting}
 loop_state:
 \end{lstlisting}
-\section{Data model}
+\section{Data model}\label{sec.datamodel}
 => set date
 => set offset pour offset audio (p-ê pas nécessaire si on fait comme LAStream)
 
