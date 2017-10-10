@@ -128,8 +128,8 @@ and interval = {
 }
 and condition = {
     condExpr: expression;
-    previousItv: interval list;
-    nextItv: interval list;
+    previousItv: interval list; (* should not be interval but some reference for instance *)
+    nextItv: interval list; (* same. have the structure in scenario instead ? *)
     status: status;
 }
 and temporalCondition = {
