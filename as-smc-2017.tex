@@ -26,6 +26,7 @@
 \usepackage{qtree}
 \usepackage{tkz-graph}  
 \usepackage{subcaption}
+\usepackage{acronym}
 \usetikzlibrary{shapes.geometric,positioning,fit,backgrounds}
 %=================================================================
 %% Please use the following mathematics environments: Theorem, Lemma, Corollary, Proposition, Characterization, Property, Problem, Example, ExamplesandDefinitions, Hypothesis, Remark, Definition
@@ -75,6 +76,7 @@
 
 \featuredapplication{Authors are encouraged to provide a concise description of the specific application or a potential application of the work. This section is not mandatory.}
 
+\acrodef{DAG}{Directed Acyclic Graph}
 
 \newcommand\mg[1]{\ensuremath{ {\boldsymbol<} #1 {\boldsymbol>} }}
 \DeclareMathOperator{\tc}{TC}
@@ -185,9 +187,9 @@ We define two core operations on parameters:
 \end{align*}
 
 \section{Temporal model}
-The temporal model is twofold: it is a hierarchical tree of processes, whose durations and execution times are directed by intervals. 
+The temporal model is twofold: it is a hierarchical tree of processes, whose durations and execution times are directed by intervals organized in a \ac{DAG}. 
 The beginning and end of the intervals is subjected to various conditions that will be presented ; these conditions allow for various 
-interactive behaviours. Processes are any kind of relevant artistic process: automations, notes sequences, sound files. 
+interactive behaviours. % TODO Processes are any kind of relevant artistic process: automations, notes sequences, sound files. 
 In particular, specific dispositions of intervals and conditions are implemented as processes themselves, scenario and loop, which allows for hierarchy.
 
 We note: $\tc$ for temporal conditions, $\ic$ for instantaneous conditions, $\itv$ for intervals, $\proc$ for processes. 
