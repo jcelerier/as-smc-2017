@@ -23,6 +23,8 @@ and composition = expression * expression * binop
 and impulse = parameter * bool
 and expression = Atom of atom | Negation of negation | Composition of composition | Impulse of impulse ;;
 
+let true_expression = Atom ((AtomValue (Bool true)), (AtomValue (Bool true)), Equal);;
+let false_expression = Atom ((AtomValue (Bool true)), (AtomValue (Bool true)), Different);;
 (* quick checks *)
 let test_atom = Atom ((AtomValue (Float 3.4)), (AtomValue (Float 4.5)), Greater);;
 let test_comp = Composition (test_atom, test_atom, Or);;
@@ -144,7 +146,6 @@ and loop = {
     endTrig: temporalCondition;
 };;
 
-(*let state proc t = proc*)
 let add_process interval proc = match interval with
   | (a,b,c,d,e) -> (a,b,c,d,proc::e);;
 
@@ -219,15 +220,100 @@ let (snd_node_1, test_g) = add_node test_g some_sound;;
 let (snd_node_2, test_g) = add_node test_g some_sound;;
 let (itv_node_1, test_g) = add_node test_g some_passthrough;;
 let (itv_node_2, test_g) = add_node test_g some_passthrough;;
-let (sc_node_1, test_g) = add_node test_g some_passthrough;;
 let (itv_node_3, test_g) = add_node test_g some_passthrough;;
+let (sc_node_1, test_g) = add_node test_g some_passthrough;;
+let (itv_node_4, test_g) = add_node test_g some_passthrough;;
 
 test_g;;
 
-let test_scenario = Scenario { intervals = [ ]; triggers = [ ]; };;
+let test_itv_1 = {
+    itvNode = itv_node_1.nodeId;
+    minDuration = 5000;
+    maxDuration = Some 5000;
+    nominalDuration = 5000;
+    date = 0; itvStatus = Waiting;
+    processes = [
+     {
+        procNode = snd_node_1.nodeId;
+        procEnable = false;
+        curTime = 0;
+        curOffset = 0;
+        curPos = 0.;
+        impl = None;
+     }
+    ];
+};;
+
+let test_itv_2 = {
+    itvNode = itv_node_2.nodeId;
+    minDuration = 3000;
+    maxDuration = Some 3000;
+    nominalDuration = 3000;
+    date = 0; itvStatus = Waiting;
+    processes = [ ];
+};;
+
+let test_itv_3 = {
+    itvNode = itv_node_3.nodeId;
+    minDuration = 5000;
+    maxDuration = Some 5000;
+    nominalDuration = 5000;
+    date = 0; itvStatus = Waiting;
+    processes = [
+     {
+        procNode = snd_node_2.nodeId;
+        procEnable = false;
+        curTime = 0;
+        curOffset = 0;
+        curPos = 0.;
+        impl = None;
+     }
+    ];
+};;
+
+let test_trig_1 = {
+    syncExpr = true_expression;
+    conds = [ {
+    condExpr = true_expression;
+    previousItv = [ ];
+    nextItv = [ test_itv_1 ];
+    status = Waiting;
+} ];
+};;
+let test_trig_2 = {
+    syncExpr = true_expression;
+    conds = [ {
+    condExpr = true_expression;
+    previousItv = [ test_itv_1 ];
+    nextItv = [ test_itv_2 ];
+    status = Waiting;
+} ];
+};;
+let test_trig_3 = {
+    syncExpr = true_expression;
+    conds = [ {
+    condExpr = true_expression;
+    previousItv = [ test_itv_2 ];
+    nextItv = [ test_itv_3 ];
+    status = Waiting;
+} ];
+};;
+let test_trig_4 = {
+    syncExpr = true_expression;
+    conds = [ {
+    condExpr = true_expression;
+    previousItv = [ test_itv_3 ];
+    nextItv = [  ];
+    status = Waiting;
+} ];
+};;
+let test_scenario = Scenario {
+    intervals = [ test_itv_1; test_itv_2; test_itv_3 ];
+    triggers = [ test_trig_1; test_trig_2; test_trig_3; test_trig_4 ];
+};;
 
 let test_root = {
-    itvNode = itv_node_3.nodeId;
+    itvNode = itv_node_4.nodeId;
     minDuration = 0;
     maxDuration = None;
     nominalDuration = 10000;
@@ -243,15 +329,9 @@ let test_root = {
         impl = test_scenario;
      }
     ]
-};
-(*
-let my_graph = create_graph;;
-let snd = float array array;;
-let snd_node_1 = create_sound_node my_graph snd;
-let snd_node_2 = create_sound_node my_graph snd;
-let itv_node_1 = create_passthrough my_graph;
-let itv_node_2 = create_passthrough my_graph;
-let sc_node_1 = create_passthrough my_graph;
-*)
+};;
+
+
+tick_interval test_root 100 0;;
 
 (* 2. Create temporal score *)

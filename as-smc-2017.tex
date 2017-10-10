@@ -371,36 +371,6 @@ This means that the execution will not miss cases where a condition would become
 \subsubsection{Operations}
 \begin{lstlisting}
 
-
-type process = 
-NodeProcess of nodeProcess | Scenario of scenario | Loop of loop
-and interval = {
-minDuration:duration;
-maxDuration : duration option;
-nominalDuration : duration;
-itvStatus: status;
-processes: process list
-}
-and condition = { 
-condExpr: expression; 
-previousItv: interval list; 
-nextItv: interval list; 
-status: status; 
-}
-and temporalCondition = { 
-syncExpr: expression; 
-conds: condition list
-}
-and scenario = { 
-intervals: interval list ; 
-triggers: temporalCondition list; 
-}
-and loop = { 
-pattern: interval; 
-startTrig: temporalCondition;
-endTrig: temporalCondition; 
-};;
-
 \end{lstlisting}
 % TODO ici on push en front, tandis qu'en C++ on push en back
 \begin{lstlisting}
@@ -494,98 +464,11 @@ Questions:
 
 \begin{lstlisting}
 
-(* ports *)
-type edgeType = Glutton | Strict | Delayed ;;
-type edge = { edgeId: int; source: int; sink: int; edgeType: edgeType; } 
-and audioPort = { audioPortId: int; audioPortAddr: audioParameter option; audioEdges: edge list } 
-and valuePort = { valuePortId: int; valuePortAddr: valueParameter option; valueEdges: edge list } 
-and port = AudioPort of audioPort | ValuePort of valuePort
-;;
-
 \end{lstlisting}
 
 \subsection{Structures}
 
 \begin{lstlisting}
-
-(* curves *)
-type curve = (float * float) list ;;
-let value_at curve x = 0.0;;
-
-(* some processes *)
-type automation = valuePort * curve;;
-type mapping = valuePort * valuePort * curve;;
-type sound = audioPort * float array array;;
-type passthrough = audioPort * valuePort * audioPort * valuePort;;
-
-type dataNode = Automation of automation | Mapping of mapping | Sound of sound | Passthrough of passthrough ;;
-type grNode = { nodeId: int; data: dataNode; enabled: bool; date: duration; position: position; };;
-
-
-type graph = { nodes: grNode list ; edges: edge list; };;
-
-let next_id lst f = 1 + (List.fold_left max 0 (List.map f lst));;
-let next_node_id lst = next_id lst (fun n -> n.nodeId);;
-let next_edge_id lst = next_id lst (fun n -> n.edgeId);;
-
-let create_audio_port = { audioPortId = 0; audioPortAddr = None; audioEdges = []; } ;;
-let create_value_port = { valuePortId = 0; valuePortAddr = None; valueEdges = []; } ;;
-let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
-let some_sound_data = Array.make 2 (Array.make 8 0.);; 
-let some_sound = Sound (create_audio_port, some_sound_data);;
-
-let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
-
-(* test *)
-let test_node_1 = { nodeId = 1; data = some_sound; enabled = false; date = 0; position = 0. };;
-let test_node_2 = { nodeId = 34; data = some_sound; enabled = false; date = 0; position = 0. };;
-next_node_id [ test_node_1; test_node_2 ] ;;   
-
-let create_graph = { nodes = []; edges = [] };;
-let add_node gr nodeDat = 
-let new_id = next_node_id gr.nodes in 
-let newNodeDat = match nodeDat with 
-| Automation a -> nodeDat
-| Mapping m -> nodeDat
-| Sound s -> nodeDat
-| Passthrough p -> nodeDat
-in
-let new_node = { nodeId = new_id; data = newNodeDat; enabled = false; date = 0; position = 0. } in
-(new_node, {nodes = new_node::gr.nodes; edges = gr.edges})
-;;
-let add_edge gr src snk t = 
-let new_id = next_edge_id gr.edges in 
-let new_edge = { edgeId = new_id; source = src; sink = snk; edgeType = t } in 
-(new_edge, { nodes = gr.nodes; edges = new_edge::gr.edges })
-;;
-
-(* test *)
-let test_g = create_graph;;
-let (snd1, test_g) = add_node test_g some_sound;;
-let (snd2, test_g) = add_node test_g some_sound;;
-let (p1, test_g) = add_node test_g some_passthrough;;
-
-(* let (e1, test_g) = add_edge snd1. *)
-
-
-type nodeProcess = { 
-node: int; 
-curTime: duration; 
-curOffset: duration;
-curPos: position;    
-};;
-
-
-
-
-
-
-node: enabled * executed * time * position * inlets * outlets * priority
-add_node graph 
-connect graph node node edge
-enable graph node
-disable graph node
-
 \end{lstlisting}
 \subsection{Operations}
 Input mix on each port
