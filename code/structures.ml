@@ -1,5 +1,11 @@
+(* Types de base *)
 type duration = int;;
 type position = float;;
+
+(* Données qu'on manipule *)
+(* Notamment, node est l'arbre de paramètres qu'on contrôle.
+ * Par exemple ça peut modéliser un synthétiseur, un programme externe, etc...
+ *)
 type value = Float of float | Int of int | Bool of bool | String of string;;
 type valueParameter = value;;
 type audioParameter = float array array;;
@@ -14,6 +20,7 @@ let pull p = match p with
 let push p nv = match p with
   | ValueParam v -> ValueParam nv ;;
 
+(* Définition des expressions à partir de ces paramètres *)
 type binop = And | Or | Xor;;
 type comparator = Greater | GreaterEq | Lower | LowerEq | Equal | Different ;;
 type atomElement = AtomParam of parameter | AtomValue of value ;;
@@ -23,21 +30,26 @@ and composition = expression * expression * binop
 and impulse = parameter * bool
 and expression = Atom of atom | Negation of negation | Composition of composition | Impulse of impulse ;;
 
+(* Deux expressions utiles *)
 let true_expression = Atom ((AtomValue (Bool true)), (AtomValue (Bool true)), Equal);;
 let false_expression = Atom ((AtomValue (Bool true)), (AtomValue (Bool true)), Different);;
+
 (* quick checks *)
 let test_atom = Atom ((AtomValue (Float 3.4)), (AtomValue (Float 4.5)), Greater);;
 let test_comp = Composition (test_atom, test_atom, Or);;
 
-(* the functions we use to work with the expressions *)
+(* TODO mais pas nécessairement pour l'article *)
 let evaluate expr = true ;;
 let update expr = expr ;;
 
-
-type status = Waiting | Pending | Happened | Disposed;;
+(* pas utile ici
 type message = { messParam: parameter ; messValue: value };;
 type state = message list;;
+*)
 
+type status = Waiting | Pending | Happened | Disposed;;
+
+(* Modèle de données *)
 (* ports *)
 type edgeType = Glutton | Strict | Delayed ;;
 type edge = { edgeId: int; source: int; sink: int; edgeType: edgeType; }
@@ -46,29 +58,30 @@ and valuePort = { valuePortId: int; valuePortAddr: valueParameter option; valueE
 and port = AudioPort of audioPort | ValuePort of valuePort
 ;;
 
-(* curves *)
 type curve = (float * float) list ;;
 let value_at curve x = 0.0;;
 
-(* some processes *)
+(* Des noeuds spécifiques *)
 type automation = valuePort * curve;;
 type mapping = valuePort * valuePort * curve;;
 type sound = audioPort * float array array;;
 type passthrough = audioPort * valuePort * audioPort * valuePort;;
 
+(* Noeuds du graphe de données *)
 type dataNode = Automation of automation | Mapping of mapping | Sound of sound | Passthrough of passthrough ;;
 type token_request = { tokenDate: duration; position: position; offset: duration; start_discontinuous: bool; end_discontinuous: bool; };;
 type grNode = { nodeId: int; data: dataNode; executed: bool; prev_date: duration; tokens: token_request list; };;
 
-
 type graph = { nodes: grNode list ; edges: edge list; };;
 
+(* opérations de création *)
 let next_id lst f = 1 + (List.fold_left max 0 (List.map f lst));;
 let next_node_id lst = next_id lst (fun n -> n.nodeId);;
 let next_edge_id lst = next_id lst (fun n -> n.edgeId);;
 
 let create_audio_port = { audioPortId = 0; audioPortAddr = None; audioEdges = []; } ;;
 let create_value_port = { valuePortId = 0; valuePortAddr = None; valueEdges = []; } ;;
+
 let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
 let some_sound_data = Array.make 2 (Array.make 8 0.);;
 let some_sound = Sound (create_audio_port, some_sound_data);;
@@ -80,25 +93,64 @@ let test_node_1 = { nodeId = 1; data = some_sound; executed = false; prev_date =
 let test_node_2 = { nodeId = 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
 next_node_id [ test_node_1; test_node_2 ] ;;
 
+
+
 let create_graph = { nodes = []; edges = [] } ;;
+
+let last_port_id graph =
+  let list_nodes_id =
+  List.map (fun node ->
+    match node.data with
+     | Automation (ip, _) -> ip.valuePortId ;
+     | Mapping (ip, op, _) -> max ip.valuePortId op.valuePortId ;
+     | Sound (op, _) -> op.audioPortId ;
+     | Passthrough (ai, vi, ao, vo) -> max (max ai.audioPortId vi.valuePortId) (max ao.audioPortId vo.valuePortId) ;
+  ) graph.nodes in
+  List.fold_left max 0 list_nodes_id
+  ;;
+
+let update_vp_id { valuePortId = id; valuePortAddr = a; valueEdges = e} new_id =
+  { valuePortId = new_id; valuePortAddr = a; valueEdges = e };;
+let update_ap_id { audioPortId = id; audioPortAddr = a; audioEdges = e} new_id =
+  { audioPortId = new_id; audioPortAddr = a; audioEdges = e };;
+
 let add_node gr nodeDat =
+  (* each port is given an identifier to which each cable can connect to *)
   let new_id = next_node_id gr.nodes in
+  let last_port_id = last_port_id gr in
   let newNodeDat = match nodeDat with
-    | Automation a -> nodeDat
-    | Mapping m -> nodeDat
-    | Sound s -> nodeDat
-    | Passthrough p -> nodeDat
+   | Automation (ip, curve) -> Automation (update_vp_id ip (last_port_id + 1), curve) ;
+   | Mapping (ip, op, curve) -> Mapping (update_vp_id ip (last_port_id + 1), update_vp_id ip (last_port_id + 2), curve) ;
+   | Sound (op, audio) -> Sound (update_ap_id op (last_port_id + 1), audio) ;
+   | Passthrough (ai, vi, ao, vo) -> Passthrough (
+        update_ap_id ai (last_port_id + 1),
+        update_vp_id vi (last_port_id + 2),
+        update_ap_id ao (last_port_id + 3),
+        update_vp_id vo (last_port_id + 4));
     in
   let new_node = { nodeId = new_id; data = newNodeDat; executed = false; prev_date = 0; tokens = [ ]; } in
   (new_node, {nodes = new_node::gr.nodes; edges = gr.edges})
 ;;
+
 let add_edge gr src snk t =
   let new_id = next_edge_id gr.edges in
   let new_edge = { edgeId = new_id; source = src; sink = snk; edgeType = t } in
   (new_edge, { nodes = gr.nodes; edges = new_edge::gr.edges })
 ;;
 
-(* test *)
+(* quick checks *)
+let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
+let some_sound_data = Array.make 2 (Array.make 8 0.);;
+let some_sound = Sound (create_audio_port, some_sound_data);;
+
+let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
+
+(* quick checks *)
+let test_node_1 = { nodeId = 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; };;
+let test_node_2 = { nodeId = 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; };;
+next_node_id [ test_node_1; test_node_2 ] ;;
+
+(* quick checks *)
 let test_g = create_graph;;
 let (snd1, test_g) = add_node test_g some_sound;;
 let (snd2, test_g) = add_node test_g some_sound;;
@@ -107,9 +159,10 @@ let (p1, test_g) = add_node test_g some_passthrough;;
 (* let (e1, test_g) = add_edge snd1. *)
 
 let make_token dur pos off = { tokenDate = dur; position = pos; offset = off; start_discontinuous = false; end_discontinuous = false; };;
-let push_token token { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } = 
+let push_token token { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } =
     { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = token::tk; } ;;
 
+(* Définitions du modèle temporel *)
 type processImpl =
     Scenario of scenario | Loop of loop | None
 and process = {
@@ -121,6 +174,7 @@ and process = {
     impl: processImpl;
 }
 and interval = {
+    itvId: int;
     itvNode: int;
     minDuration: duration;
     maxDuration : duration option;
@@ -131,8 +185,8 @@ and interval = {
 }
 and condition = {
     condExpr: expression;
-    previousItv: interval list; (* should not be interval but some reference for instance *)
-    nextItv: interval list; (* same. have the structure in scenario instead ? *)
+    previousItv: int list;
+    nextItv: int list;
     status: status;
 }
 and temporalCondition = {
@@ -153,6 +207,7 @@ let add_process interval proc = match interval with
   | (a,b,c,d,e) -> (a,b,c,d,proc::e);;
 
 (* this supposes that the conditions and triggers are part of the scenario *)
+let next_interval_id lst = next_id lst (fun n -> n.itvId);;
 let add_interval sc inv = { intervals = inv::sc.intervals; triggers = sc.triggers };;
 let add_trigger sc trg = { intervals = sc.intervals; triggers = trg::sc.triggers };;
 
@@ -177,7 +232,7 @@ let add_tick_to_node nodeId token graph =
     replace_node graph nodeId new_node;;
 ;;
 
-(* These functions tick the temporal graph. They produce a pair : 
+(* These functions tick the temporal graph. They produce a pair :
  (new object, function to call on the data graph)
 *)
 
@@ -206,6 +261,7 @@ and tick_interval itv t offset =
     let tp = tick_process new_date new_pos offset in
     let ticked_procs = (List.map tp itv.processes) in
     ({
+      itvId = itv.itvId;
       itvNode = itv.itvNode;
       minDuration = itv.minDuration;
       maxDuration = itv.maxDuration;
@@ -219,95 +275,136 @@ and tick_interval itv t offset =
 (** graph execution functions **)
 
 (* apply a list of functions to the state of the graph *)
-let update_graph fun_list graph = 
+let update_graph fun_list graph =
     let apply_rev_fun g f = f g in
     List.fold_left apply_rev_fun graph fun_list ;;
 
 let is_enabled n = (List.length n.tokens) == 0;;
 
 (* todo : disables all nodes which are in strict relationship with a disabled node. *)
-let disable_strict_nodes nodes = 
+let disable_strict_nodes nodes =
     nodes;;
-    
+
 (* todo : topologically sorted list of nodes *)
-let topo_sort graph = 
+let topo_sort graph =
     graph.nodes;;
 
-(* todo : when a node can execute *)    
+(* todo : when a node can execute *)
 let can_execute nodes = true;;
 
 (* todo : remove the data stored in a port *)
-let clear_port p = 
+let clear_port p =
   p;;
-  
+
 (* todo : copy data from the cables & environment to the port *)
-let init_port p graph = 
+let init_port p graph =
   p;;
-  
+
 (* this sets-up  a node for before its execution *)
-let init_node n g e = 
+let init_node n g e =
  (* clear the outputs of the node *)
- let cleared_data = match n.data with 
+ let cleared_data = match n.data with
    | Automation (ip, curve) -> Automation (ip, curve) ;
    | Mapping (ip, op, curve) -> Mapping (ip, clear_port op, curve) ;
    | Sound (ap, audio) -> Sound (ap, audio) ;
    | Passthrough (ai, vi, ao, vo) -> Passthrough (ai, vi, clear_port ao, clear_port vo) ;
- in 
- 
+ in
+
  (* copy data from the environment or edges to the inputs *)
- let init_data = match cleared_data with 
+ let init_data = match cleared_data with
    | Automation (ip, curve) -> Automation (init_port ip g, curve) ;
    | Mapping (ip, op, curve) -> Mapping (init_port ip g, op, curve) ;
    | Sound (op, audio) -> Sound (op, audio) ;
    | Passthrough (ai, vi, ao, vo) -> Passthrough (init_port ai g, init_port vi g, ao, vo) ;
-   
-  in { nodeId = n.nodeId; data = init_data; executed = n.executed; prev_date = n.prev_date; tokens = n.tokens; } 
+
+  in { nodeId = n.nodeId; data = init_data; executed = n.executed; prev_date = n.prev_date; tokens = n.tokens; }
 ;;
 
-let exec_node_impl data token e = 
+let exec_node_impl data token e =
   data
 ;;
-    
-let exec_node g e { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } token = 
-  { nodeId = id; 
+
+let exec_node g e { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } token =
+  { nodeId = id;
     data = exec_node_impl dn token e;
-    executed = true; 
-    prev_date = token.tokenDate; 
-    tokens = tk; 
+    executed = true;
+    prev_date = token.tokenDate;
+    tokens = tk;
 };;
 
 let remove_node l nodeId = List.filter (fun x -> x.nodeId == nodeId) l ;;
 let teardown_node n g e = n ;;
-  
-let nodes_topo_sort n1 n2 = 0 ;;
+
+ (* todo *)
+
+let has_port_input node = true;;
+let has_local_input node = true;;
+let has_global_input node = true;;
+
+let rec find_first sorted_nodes n1 n2 =
+  match sorted_nodes with
+   | [ ] -> raise (Failure "can't happen");
+   | t :: q -> if t == n1 then
+                 1
+               else if t == n2 then
+                -1
+               else find_first q n1 n2;;
+
+let nodes_sort sorted_nodes n1 n2 =
+  let p1 = has_port_input n1 in
+  let p2 = has_port_input n2 in
+  let l1 = has_local_input n1 in
+  let l2 = has_local_input n2 in
+  let g1 = has_global_input n1 in
+  let g2 = has_global_input n2 in
+  if p1 && not p2 then
+    1
+  else if not p1 && p2 then
+    -1
+  else if p1 && p2 then
+    find_first sorted_nodes n1 n2
+
+  else if l1 && not l2 then
+    1
+  else if not l1 && l2 then
+    -1
+  else if l1 && l2 then
+    find_first sorted_nodes n1 n2
+
+  else if g1 && not g2 then
+    1
+  else if not g1 && g2 then
+    -1
+  else
+    find_first sorted_nodes n1 n2
+;;
+
 let rec sub_tick graph nodes e =
     match nodes with
      | [ ] -> graph ;
-     | nl -> 
+     | nl ->
         let next_nodes = List.filter can_execute nodes in
-        let sorted_next_nodes = List.sort nodes_topo_sort next_nodes in 
-        match sorted_next_nodes with 
+        let sorted_next_nodes = List.sort (nodes_sort next_nodes) next_nodes in
+        match sorted_next_nodes with
           | [ ] -> graph ;
-          | cur_node::q -> 
-            let (in_node:grNode) = init_node cur_node graph e in 
+          | cur_node::q ->
+            let (in_node:grNode) = init_node cur_node graph e in
             let ran_node = List.fold_left (exec_node graph e) in_node cur_node.tokens  in
-            let fin_node = teardown_node ran_node graph e in 
+            let fin_node = teardown_node ran_node graph e in
             let new_graph = replace_node graph fin_node.nodeId fin_node in
-            
-            sub_tick new_graph (remove_node next_nodes cur_node.nodeId) e ;; 
-        
-     
-let tick_graph_topo graph e = 
+            sub_tick new_graph (remove_node next_nodes cur_node.nodeId) e ;;
+
+
+let tick_graph_topo graph e =
     (* we mark the nodes which had tokens posted to as enabled *)
     let enabled_nodes = disable_strict_nodes (List.filter is_enabled graph.nodes) in
-    let sorted_nodes = topo_sort graph in 
+    let sorted_nodes = topo_sort graph in
     let filtered_nodes = List.filter (fun n -> (List.mem n enabled_nodes)) sorted_nodes in
     sub_tick graph filtered_nodes e;;
 (** utility functions **)
 
-
 (* Complete example: 2-track sequencer *)
-(* 1. Create graph *)
+(* 1. Create data graph *)
 
 let test_g = create_graph;;
 let (snd_node_1, test_g) = add_node test_g some_sound;;
@@ -320,7 +417,9 @@ let (itv_node_4, test_g) = add_node test_g some_passthrough;;
 
 test_g;;
 
+(* 2. Create temporal structures *)
 let test_itv_1 = {
+    itvId = 1;
     itvNode = itv_node_1.nodeId;
     minDuration = 5000;
     maxDuration = Some 5000;
@@ -339,6 +438,7 @@ let test_itv_1 = {
 };;
 
 let test_itv_2 = {
+    itvId = 2;
     itvNode = itv_node_2.nodeId;
     minDuration = 3000;
     maxDuration = Some 3000;
@@ -348,6 +448,7 @@ let test_itv_2 = {
 };;
 
 let test_itv_3 = {
+    itvId = 3;
     itvNode = itv_node_3.nodeId;
     minDuration = 5000;
     maxDuration = Some 5000;
@@ -370,7 +471,7 @@ let test_trig_1 = {
     conds = [ {
     condExpr = true_expression;
     previousItv = [ ];
-    nextItv = [ test_itv_1 ];
+    nextItv = [ 1 ];
     status = Waiting;
 } ];
 };;
@@ -378,8 +479,8 @@ let test_trig_2 = {
     syncExpr = true_expression;
     conds = [ {
     condExpr = true_expression;
-    previousItv = [ test_itv_1 ];
-    nextItv = [ test_itv_2 ];
+    previousItv = [ 1 ];
+    nextItv = [ 2 ];
     status = Waiting;
 } ];
 };;
@@ -387,8 +488,8 @@ let test_trig_3 = {
     syncExpr = true_expression;
     conds = [ {
     condExpr = true_expression;
-    previousItv = [ test_itv_2 ];
-    nextItv = [ test_itv_3 ];
+    previousItv = [ 2 ];
+    nextItv = [ 3 ];
     status = Waiting;
 } ];
 };;
@@ -396,7 +497,7 @@ let test_trig_4 = {
     syncExpr = true_expression;
     conds = [ {
     condExpr = true_expression;
-    previousItv = [ test_itv_3 ];
+    previousItv = [ 3 ];
     nextItv = [  ];
     status = Waiting;
 } ];
@@ -407,6 +508,7 @@ let test_scenario = Scenario {
 };;
 
 let test_root = {
+    itvId = 1; (* we can reuse the id 1 since it's a different hierarchy level *)
     itvNode = itv_node_4.nodeId;
     minDuration = 0;
     maxDuration = None;
@@ -425,8 +527,17 @@ let test_root = {
     ]
 };;
 
+let env k = 0 ;;
+let temporal_tick_res = tick_interval test_root 100 0;;
+let test_g = update_graph (tuple_second temporal_tick_res) test_g;;
+let test_g = tick_graph_topo test_g env;;
 
-let temporal_tic_res = tick_interval test_root 100 0;;
+let temporal_tick_res = tick_interval (tuple_first temporal_tick_res) 100 0;;
+let test_g = update_graph (tuple_second temporal_tick_res) test_g;;
+let test_g = tick_graph_topo test_g env;;
+
+let temporal_tick_res = tick_interval (tuple_first temporal_tick_res) 100 0;;
+let test_g = update_graph (tuple_second temporal_tick_res) test_g;;
+let test_g = tick_graph_topo test_g env;;
 
 
-(* 2. Create temporal score *)
