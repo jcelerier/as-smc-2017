@@ -57,7 +57,8 @@ type sound = audioPort * float array array;;
 type passthrough = audioPort * valuePort * audioPort * valuePort;;
 
 type dataNode = Automation of automation | Mapping of mapping | Sound of sound | Passthrough of passthrough ;;
-type grNode = { nodeId: int; data: dataNode; enabled: bool; date: duration; position: position; offset: duration; };;
+type token_request = { date: duration; position: position; offset: duration; start_discontinuous: bool; end_discontinuous: bool; };;
+type grNode = { nodeId: int; data: dataNode; enabled: bool; prev_date: duration; tokens: token_request list; };;
 
 
 type graph = { nodes: grNode list ; edges: edge list; };;
@@ -75,11 +76,11 @@ let some_sound = Sound (create_audio_port, some_sound_data);;
 let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
 
 (* test *)
-let test_node_1 = { nodeId = 1; data = some_sound; enabled = false; date = 0; position = 0.; offset = 0; };;
-let test_node_2 = { nodeId = 34; data = some_sound; enabled = false; date = 0; position = 0.; offset = 0; };;
+let test_node_1 = { nodeId = 1; data = some_sound; enabled = false; prev_date = 0; tokens = [ ]; } ;;
+let test_node_2 = { nodeId = 34; data = some_sound; enabled = false; prev_date = 0; tokens = [ ]; } ;;
 next_node_id [ test_node_1; test_node_2 ] ;;
 
-let create_graph = { nodes = []; edges = [] };;
+let create_graph = { nodes = []; edges = [] } ;;
 let add_node gr nodeDat =
   let new_id = next_node_id gr.nodes in
   let newNodeDat = match nodeDat with
@@ -88,7 +89,7 @@ let add_node gr nodeDat =
     | Sound s -> nodeDat
     | Passthrough p -> nodeDat
     in
-  let new_node = { nodeId = new_id; data = newNodeDat; enabled = false; date = 0; position = 0.; offset = 0; } in
+  let new_node = { nodeId = new_id; data = newNodeDat; enabled = false; prev_date = 0; tokens = [ ]; } in
   (new_node, {nodes = new_node::gr.nodes; edges = gr.edges})
 ;;
 let add_edge gr src snk t =
@@ -168,9 +169,7 @@ let graph_tick nodeId enable newdate newpos off graph =
         nodeId = node.nodeId;
         data =  node.data;
         enabled = enable;
-        date = newdate;
-        position = newpos;
-        offset = off;
+        prev_date = newdate;
     } in
     replace_node graph nodeId new_node;;
 ;;
