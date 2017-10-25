@@ -57,8 +57,8 @@ type sound = audioPort * float array array;;
 type passthrough = audioPort * valuePort * audioPort * valuePort;;
 
 type dataNode = Automation of automation | Mapping of mapping | Sound of sound | Passthrough of passthrough ;;
-type token_request = { date: duration; position: position; offset: duration; start_discontinuous: bool; end_discontinuous: bool; };;
-type grNode = { nodeId: int; data: dataNode; enabled: bool; prev_date: duration; tokens: token_request list; };;
+type token_request = { tokenDate: duration; position: position; offset: duration; start_discontinuous: bool; end_discontinuous: bool; };;
+type grNode = { nodeId: int; data: dataNode; executed: bool; prev_date: duration; tokens: token_request list; };;
 
 
 type graph = { nodes: grNode list ; edges: edge list; };;
@@ -76,8 +76,8 @@ let some_sound = Sound (create_audio_port, some_sound_data);;
 let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
 
 (* test *)
-let test_node_1 = { nodeId = 1; data = some_sound; enabled = false; prev_date = 0; tokens = [ ]; } ;;
-let test_node_2 = { nodeId = 34; data = some_sound; enabled = false; prev_date = 0; tokens = [ ]; } ;;
+let test_node_1 = { nodeId = 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
+let test_node_2 = { nodeId = 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
 next_node_id [ test_node_1; test_node_2 ] ;;
 
 let create_graph = { nodes = []; edges = [] } ;;
@@ -89,7 +89,7 @@ let add_node gr nodeDat =
     | Sound s -> nodeDat
     | Passthrough p -> nodeDat
     in
-  let new_node = { nodeId = new_id; data = newNodeDat; enabled = false; prev_date = 0; tokens = [ ]; } in
+  let new_node = { nodeId = new_id; data = newNodeDat; executed = false; prev_date = 0; tokens = [ ]; } in
   (new_node, {nodes = new_node::gr.nodes; edges = gr.edges})
 ;;
 let add_edge gr src snk t =
@@ -106,7 +106,9 @@ let (p1, test_g) = add_node test_g some_passthrough;;
 
 (* let (e1, test_g) = add_edge snd1. *)
 
-
+let make_token dur pos off = { tokenDate = dur; position = pos; offset = off; start_discontinuous = false; end_discontinuous = false; };;
+let push_token token { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } = 
+    { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = token::tk; } ;;
 
 type processImpl =
     Scenario of scenario | Loop of loop | None
@@ -163,16 +165,21 @@ let replace_node graph nodeId newNode =
      edges = graph.edges};;
 
 let graph_ident g = g;;
-let graph_tick nodeId enable newdate newpos off graph =
+let add_tick_to_node nodeId token graph =
     let node = find_node graph nodeId in
     let new_node = {
         nodeId = node.nodeId;
         data =  node.data;
-        enabled = enable;
-        prev_date = newdate;
+        executed = node.executed;
+        prev_date = node.prev_date;
+        tokens = node.tokens @ [ token ]; (* tokens go from oldest to newest *)
     } in
     replace_node graph nodeId new_node;;
 ;;
+
+(* These functions tick the temporal graph. They produce a pair : 
+ (new object, function to call on the data graph)
+*)
 
 let rec
     tick_scenario s d p o = (Scenario s, graph_ident);
@@ -194,20 +201,108 @@ and tick_process newdate newpos offset (p: process) =
     }, tuple_second tick_res);
 
 and tick_interval itv t offset =
-    let tp = tick_process (itv.date + t) (float_of_int (itv.date + t) /. float_of_int itv.nominalDuration) offset in
+    let new_date = (itv.date + t) in
+    let new_pos = (float_of_int new_date /. float_of_int itv.nominalDuration) in
+    let tp = tick_process new_date new_pos offset in
     let ticked_procs = (List.map tp itv.processes) in
     ({
       itvNode = itv.itvNode;
       minDuration = itv.minDuration;
       maxDuration = itv.maxDuration;
       nominalDuration = itv.nominalDuration;
-      date = itv.date + t;
+      date = new_date;
       itvStatus = itv.itvStatus;
       processes = (List.map tuple_first ticked_procs)
     },
-    List.map tuple_second ticked_procs);;
+    (add_tick_to_node itv.itvNode (make_token new_date new_pos offset)) :: (List.map tuple_second ticked_procs));;
 
+(** graph execution functions **)
 
+(* apply a list of functions to the state of the graph *)
+let update_graph fun_list graph = 
+    let apply_rev_fun g f = f g in
+    List.fold_left apply_rev_fun graph fun_list ;;
+
+let is_enabled n = (List.length n.tokens) == 0;;
+
+(* todo : disables all nodes which are in strict relationship with a disabled node. *)
+let disable_strict_nodes nodes = 
+    nodes;;
+    
+(* todo : topologically sorted list of nodes *)
+let topo_sort graph = 
+    graph.nodes;;
+
+(* todo : when a node can execute *)    
+let can_execute nodes = true;;
+
+(* todo : remove the data stored in a port *)
+let clear_port p = 
+  p;;
+  
+(* todo : copy data from the cables & environment to the port *)
+let init_port p graph = 
+  p;;
+  
+(* this sets-up  a node for before its execution *)
+let init_node n g e = 
+ (* clear the outputs of the node *)
+ let cleared_data = match n.data with 
+   | Automation (ip, curve) -> Automation (ip, curve) ;
+   | Mapping (ip, op, curve) -> Mapping (ip, clear_port op, curve) ;
+   | Sound (ap, audio) -> Sound (ap, audio) ;
+   | Passthrough (ai, vi, ao, vo) -> Passthrough (ai, vi, clear_port ao, clear_port vo) ;
+ in 
+ 
+ (* copy data from the environment or edges to the inputs *)
+ let init_data = match cleared_data with 
+   | Automation (ip, curve) -> Automation (init_port ip g, curve) ;
+   | Mapping (ip, op, curve) -> Mapping (init_port ip g, op, curve) ;
+   | Sound (op, audio) -> Sound (op, audio) ;
+   | Passthrough (ai, vi, ao, vo) -> Passthrough (init_port ai g, init_port vi g, ao, vo) ;
+   
+  in { nodeId = n.nodeId; data = init_data; executed = n.executed; prev_date = n.prev_date; tokens = n.tokens; } 
+;;
+
+let exec_node_impl data token e = 
+  data
+;;
+    
+let exec_node g e { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } token = 
+  { nodeId = id; 
+    data = exec_node_impl dn token e;
+    executed = true; 
+    prev_date = token.tokenDate; 
+    tokens = tk; 
+};;
+
+let remove_node l nodeId = List.filter (fun x -> x.nodeId == nodeId) l ;;
+let teardown_node n g e = n ;;
+  
+let nodes_topo_sort n1 n2 = 0 ;;
+let rec sub_tick graph nodes e =
+    match nodes with
+     | [ ] -> graph ;
+     | nl -> 
+        let next_nodes = List.filter can_execute nodes in
+        let sorted_next_nodes = List.sort nodes_topo_sort next_nodes in 
+        match sorted_next_nodes with 
+          | [ ] -> graph ;
+          | cur_node::q -> 
+            let (in_node:grNode) = init_node cur_node graph e in 
+            let ran_node = List.fold_left (exec_node graph e) in_node cur_node.tokens  in
+            let fin_node = teardown_node ran_node graph e in 
+            let new_graph = replace_node graph fin_node.nodeId fin_node in
+            
+            sub_tick new_graph (remove_node next_nodes cur_node.nodeId) e ;; 
+        
+     
+let tick_graph_topo graph e = 
+    (* we mark the nodes which had tokens posted to as enabled *)
+    let enabled_nodes = disable_strict_nodes (List.filter is_enabled graph.nodes) in
+    let sorted_nodes = topo_sort graph in 
+    let filtered_nodes = List.filter (fun n -> (List.mem n enabled_nodes)) sorted_nodes in
+    sub_tick graph filtered_nodes e;;
 (** utility functions **)
 
 
@@ -331,6 +426,7 @@ let test_root = {
 };;
 
 
-tick_interval test_root 100 0;;
+let temporal_tic_res = tick_interval test_root 100 0;;
+
 
 (* 2. Create temporal score *)
