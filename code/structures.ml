@@ -326,6 +326,10 @@ and scenario_event_dispose scenario event =
    let stopped_set = 0 in 
    (scenario, event, stopped_set) 
    
+   (* we save for each branch of the temporal scenario, the number of samples we yet have 
+      to go through *)
+and scenario_update_overtick scenario itv end_tc tick old_date overticks = 
+  let overtick = tick - w
 (* scenario::process_this
 and scenario_process_tc scenario tc statusChangedEvents startedIntervals stoppedIntervals = 
   let itvMinDurReached itv = 
@@ -384,13 +388,13 @@ let init_node n g e =
 ;;
 
 (* actual implementation of the execution algorithm for each kind of process... not really relevant *)
-let exec_node_impl data token e =
+let exec_node_impl data token =
   data
 ;;
 
-let exec_node g e { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } token =
+let exec_node g { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } token =
   { nodeId = id;
-    data = exec_node_impl dn token e;
+    data = exec_node_impl dn token;
     executed = true;
     prev_date = token.tokenDate;
     tokens = tk;
@@ -467,7 +471,8 @@ let rec sub_tick graph nodes e =
             let cur_node = init_node cur_node graph e in
             
             (* execute all the sub-ticks for this node *)
-            let cur_node = List.fold_left (exec_node graph e) cur_node cur_node.tokens  in
+            (* note: actually it's ok to reuse the same environment: it is only used for reading *)
+            let cur_node = List.fold_left (exec_node graph) cur_node cur_node.tokens  in
             
             (* clear its inputs and copy its outputs to the environment or delay lines if relevant *)
             let (cur_node, graph, e) = teardown_node cur_node graph e in
