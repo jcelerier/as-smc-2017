@@ -2,6 +2,12 @@
 type duration = int;;
 type position = float;;
 
+(* a "None" optional duration means infinite: *)
+let is_infinite t = match t with 
+  | None -> true ; 
+  | _ -> false;;
+  
+  
 (* Données qu'on manipule *)
 (* Notamment, node est l'arbre de paramètres qu'on contrôle.
  * Par exemple ça peut modéliser un synthétiseur, un programme externe, etc...
@@ -162,7 +168,7 @@ let make_token dur pos off = { tokenDate = dur; position = pos; offset = off; st
 let push_token token { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } =
     { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = token::tk; } ;;
 
-(* Définitions du modèle temporel *)
+(* temporal model definitions *)
 type processImpl =
     Scenario of scenario | Loop of loop | None
 and process = {
@@ -203,6 +209,16 @@ and loop = {
     endTrig: temporalCondition;
 };;
 
+(* todo *)
+let find_prev_condition itv scenario = 
+  let conditions = List.concat (List.map (fun t -> t.conds) scenario.triggers) in 
+  List.find (fun ic -> (List.exists (fun id -> id == itv.itvId) ic.nextItv)) conditions
+;;
+let find_next_condition itv scenario = 
+  let conditions = List.concat (List.map (fun t -> t.conds) scenario.triggers) in 
+  List.find (fun ic -> (List.exists (fun id -> id == itv.itvId) ic.previousItv)) conditions
+  ;;
+  
 let add_process interval proc = match interval with
   | (a,b,c,d,e) -> (a,b,c,d,proc::e);;
 
@@ -270,7 +286,56 @@ and tick_interval itv t offset =
       itvStatus = itv.itvStatus;
       processes = (List.map tuple_first ticked_procs)
     },
-    (add_tick_to_node itv.itvNode (make_token new_date new_pos offset)) :: (List.map tuple_second ticked_procs));;
+    (add_tick_to_node itv.itvNode (make_token new_date new_pos offset)) :: (List.map tuple_second ticked_procs))
+
+    
+and tick_interval_safe itv t offset = 
+    (* tick a given interval without going past the max bound *)
+    match itv.maxDuration with 
+    | None -> tick_interval itv t offset
+    | Some tmax -> tick_interval itv (min t (tmax - itv.date)) offset
+    
+
+and start_interval itv t =
+    let ticked_procs = (List.map (tick_process 0 0. 0) itv.processes) in
+    ({
+      itvId = itv.itvId;
+      itvNode = itv.itvNode;
+      minDuration = itv.minDuration;
+      maxDuration = itv.maxDuration;
+      nominalDuration = itv.nominalDuration;
+      date = 0;
+      itvStatus = Waiting;
+      processes = (List.map tuple_first ticked_procs)
+    },
+    (add_tick_to_node itv.itvNode (make_token 0 0. 0)) :: (List.map tuple_second ticked_procs))
+and stop_interval itv t = (*todo*)
+    itv 
+
+and scenario_event_happen scenario event = 
+   (* mark event as executed, add previous intervals to stop set, next intervals to start set *)
+   let started_set = 0 in
+   let stopped_set = 0 in
+   (scenario, event, started_set, stopped_set)
+
+and scenario_event_dispose scenario event = 
+   (* mark event as disposed, 
+      add previous intervals to stop set, 
+      disable next intervals, 
+      disable next events if all of their previous intervals are disabled *)
+   let stopped_set = 0 in 
+   (scenario, event, stopped_set) 
+   
+(* scenario::process_this
+and scenario_process_tc scenario tc statusChangedEvents startedIntervals stoppedIntervals = 
+  let itvMinDurReached itv = 
+    let prev_ic = find_prev_condition itv in 
+    let 
+    
+  in
+  let minDurReached ev = List.map 
+*)
+;;
 
 (** graph execution functions **)
 
@@ -303,23 +368,22 @@ let init_port p graph =
 (* this sets-up  a node for before its execution *)
 let init_node n g e =
  (* clear the outputs of the node *)
- let cleared_data = match n.data with
-   | Automation (ip, curve) -> Automation (ip, curve) ;
-   | Mapping (ip, op, curve) -> Mapping (ip, clear_port op, curve) ;
-   | Sound (ap, audio) -> Sound (ap, audio) ;
-   | Passthrough (ai, vi, ao, vo) -> Passthrough (ai, vi, clear_port ao, clear_port vo) ;
- in
-
- (* copy data from the environment or edges to the inputs *)
- let init_data = match cleared_data with
+ (* and copy data from the environment or edges to the inputs *)
+ let init_data = match n.data with
    | Automation (ip, curve) -> Automation (init_port ip g, curve) ;
-   | Mapping (ip, op, curve) -> Mapping (init_port ip g, op, curve) ;
-   | Sound (op, audio) -> Sound (op, audio) ;
-   | Passthrough (ai, vi, ao, vo) -> Passthrough (init_port ai g, init_port vi g, ao, vo) ;
-
-  in { nodeId = n.nodeId; data = init_data; executed = n.executed; prev_date = n.prev_date; tokens = n.tokens; }
+   | Mapping (ip, op, curve) -> Mapping (init_port ip g, clear_port op, curve) ;
+   | Sound (ap, audio) -> Sound (init_port ap g, audio) ;
+   | Passthrough (ai, vi, ao, vo) -> Passthrough (init_port ai g, init_port vi g, clear_port ao, clear_port vo) ;
+  in { 
+    nodeId = n.nodeId;
+    data = init_data; 
+    executed = n.executed; 
+    prev_date = n.prev_date; 
+    tokens = n.tokens;
+  }
 ;;
 
+(* actual implementation of the execution algorithm for each kind of process... not really relevant *)
 let exec_node_impl data token e =
   data
 ;;
@@ -333,22 +397,30 @@ let exec_node g e { nodeId = id; data = dn; executed = e; prev_date = pd; tokens
 };;
 
 let remove_node l nodeId = List.filter (fun x -> x.nodeId == nodeId) l ;;
-let teardown_node n g e = n ;;
 
- (* todo *)
+(* clear the inputs of a node, and copy its outputs to the environment & delay lines *)
+let teardown_node n g e = (n, g, e);;
 
+(* todo *)
+
+(* any input has an edge going in *)
 let has_port_input node = true;;
+
+(* any input has an address present in the local scope *)
 let has_local_input node = true;;
+
+(* any input has an address present in the global scope *)
 let has_global_input node = true;;
 
+(* finds which element occurs at the earliest in a list *)
 let rec find_first sorted_nodes n1 n2 =
   match sorted_nodes with
    | [ ] -> raise (Failure "can't happen");
-   | t :: q -> if t == n1 then
+   | h :: t-> if h == n1 then
                  1
-               else if t == n2 then
+               else if h == n2 then
                 -1
-               else find_first q n1 n2;;
+               else find_first t n1 n2;;
 
 let nodes_sort sorted_nodes n1 n2 =
   let p1 = has_port_input n1 in
@@ -381,18 +453,28 @@ let nodes_sort sorted_nodes n1 n2 =
 
 let rec sub_tick graph nodes e =
     match nodes with
-     | [ ] -> graph ;
-     | nl ->
+     | [ ] -> (graph, e);
+     | _ ->
+        (* look for all the nodes that can be executed at this point *)
         let next_nodes = List.filter can_execute nodes in
-        let sorted_next_nodes = List.sort (nodes_sort next_nodes) next_nodes in
-        match sorted_next_nodes with
-          | [ ] -> graph ;
+        
+        (* order them and run the first one *)
+        let next_nodes = List.sort (nodes_sort next_nodes) next_nodes in
+        match next_nodes with
+          | [ ] -> (graph, e) ;
           | cur_node::q ->
-            let (in_node:grNode) = init_node cur_node graph e in
-            let ran_node = List.fold_left (exec_node graph e) in_node cur_node.tokens  in
-            let fin_node = teardown_node ran_node graph e in
-            let new_graph = replace_node graph fin_node.nodeId fin_node in
-            sub_tick new_graph (remove_node next_nodes cur_node.nodeId) e ;;
+            (* set it up by copying data to its inputs *)
+            let cur_node = init_node cur_node graph e in
+            
+            (* execute all the sub-ticks for this node *)
+            let cur_node = List.fold_left (exec_node graph e) cur_node cur_node.tokens  in
+            
+            (* clear its inputs and copy its outputs to the environment or delay lines if relevant *)
+            let (cur_node, graph, e) = teardown_node cur_node graph e in
+            
+            (* repeat on the updated graph *)
+            let graph = replace_node graph cur_node.nodeId cur_node in
+            sub_tick graph (remove_node next_nodes cur_node.nodeId) e ;;
 
 
 let tick_graph_topo graph e =
@@ -401,8 +483,7 @@ let tick_graph_topo graph e =
     let sorted_nodes = topo_sort graph in
     let filtered_nodes = List.filter (fun n -> (List.mem n enabled_nodes)) sorted_nodes in
     sub_tick graph filtered_nodes e;;
-(** utility functions **)
-
+    
 (* Complete example: 2-track sequencer *)
 (* 1. Create data graph *)
 
@@ -527,17 +608,17 @@ let test_root = {
     ]
 };;
 
-let env k = 0 ;;
+let env = 0;;
 let temporal_tick_res = tick_interval test_root 100 0;;
 let test_g = update_graph (tuple_second temporal_tick_res) test_g;;
-let test_g = tick_graph_topo test_g env;;
+let (test_g, env2) = tick_graph_topo test_g env;;
 
 let temporal_tick_res = tick_interval (tuple_first temporal_tick_res) 100 0;;
 let test_g = update_graph (tuple_second temporal_tick_res) test_g;;
-let test_g = tick_graph_topo test_g env;;
+let (test_g, env) = tick_graph_topo test_g env;;
 
 let temporal_tick_res = tick_interval (tuple_first temporal_tick_res) 100 0;;
 let test_g = update_graph (tuple_second temporal_tick_res) test_g;;
-let test_g = tick_graph_topo test_g env;;
+let (test_g, env) = tick_graph_topo test_g env;;
 
 
