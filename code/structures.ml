@@ -1,13 +1,19 @@
-
 (* utility *)
 
-let tuple_first (a,b) = a;;
-let tuple_second (a,b) = b;;
+let tuple_first (a, b) = a;;
+let tuple_second (a, b) = b;;
+
 let list_assoc_replace lst key newval = 
   (key, newval) :: (List.remove_assoc key lst)
-  ;;
+;;
 
-(* Types de base *)
+(* given a function that returns identifiers for elements of a list, 
+   return the next biggest identifier *)
+let next_id lst f = 
+  1 + (List.fold_left max 0 (List.map f lst))
+;;
+
+(* base types *)
 type duration = int;;
 type position = float;;
 
@@ -15,12 +21,11 @@ type position = float;;
 let is_infinite t = match t with 
   | None -> true ; 
   | _ -> false;;
-  
-  
-(* Données qu'on manipule *)
-(* Notamment, node est l'arbre de paramètres qu'on contrôle.
- * Par exemple ça peut modéliser un synthétiseur, un programme externe, etc...
- *)
+
+
+(*************
+ * data tree *
+ *************)
 type value = Float of float | Int of int | Bool of bool | String of string;;
 type valueParameter = value;;
 type audioParameter = float array array;;
@@ -35,7 +40,10 @@ let pull p = match p with
 let push p nv = match p with
   | ValueParam v -> ValueParam nv ;;
 
-(* Définition des expressions à partir de ces paramètres *)
+
+(***************
+ * expressions *
+ ***************)
 type binop = And | Or | Xor;;
 type comparator = Greater | GreaterEq | Lower | LowerEq | Equal | Different ;;
 type atomElement = AtomParam of parameter | AtomValue of value ;;
@@ -57,14 +65,12 @@ let test_comp = Composition (test_atom, test_atom, Or);;
 let evaluate expr = true ;;
 let update expr = expr ;;
 
-(* pas utile ici
-type message = { messParam: parameter ; messValue: value };;
-type state = message list;;
-*)
-
 type status = Waiting | Pending | Happened | Disposed;;
 
-(* Modèle de données *)
+(**************
+ * data model *
+ **************)
+ 
 (* ports *)
 type edgeType = Glutton | Strict | Delayed ;;
 type edge = { edgeId: int; source: int; sink: int; edgeType: edgeType; }
@@ -76,27 +82,49 @@ and port = AudioPort of audioPort | ValuePort of valuePort
 type curve = (float * float) list ;;
 let value_at curve x = 0.0;;
 
-(* Des noeuds spécifiques *)
+(* some specific nodes *)
 type automation = valuePort * curve;;
 type mapping = valuePort * valuePort * curve;;
 type sound = audioPort * float array array;;
 type passthrough = audioPort * valuePort * audioPort * valuePort;;
 
-(* Noeuds du graphe de données *)
+(* tokens *)
+type token_request = { 
+    tokenDate: duration; 
+    position: position; 
+    offset: duration; 
+    start_discontinuous: bool; 
+    end_discontinuous: bool; 
+};;
+
+let make_token dur pos off = 
+{ tokenDate = dur; 
+  position = pos; 
+  offset = off; 
+  start_discontinuous = false; 
+  end_discontinuous = false; 
+};;
+
+(* nodes of the data graph *)
 type dataNode = Automation of automation | Mapping of mapping | Sound of sound | Passthrough of passthrough ;;
-type token_request = { tokenDate: duration; position: position; offset: duration; start_discontinuous: bool; end_discontinuous: bool; };;
 type grNode = { nodeId: int; data: dataNode; executed: bool; prev_date: duration; tokens: token_request list; };;
 
 type graph = { nodes: grNode list ; edges: edge list; };;
+let create_graph = { nodes = []; edges = [] } ;;
 
-(* opérations de création *)
-let next_id lst f = 1 + (List.fold_left max 0 (List.map f lst));;
+
+(* utilities and tests *)
+let push_token token node = 
+  { node with tokens = token::node.tokens }
+;;
+
 let next_node_id lst = next_id lst (fun n -> n.nodeId);;
 let next_edge_id lst = next_id lst (fun n -> n.edgeId);;
 
 let create_audio_port = { audioPortId = 0; audioPortAddr = None; audioEdges = []; } ;;
 let create_value_port = { valuePortId = 0; valuePortAddr = None; valueEdges = []; } ;;
 
+(* test *)
 let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
 let some_sound_data = Array.make 2 (Array.make 8 0.);;
 let some_sound = Sound (create_audio_port, some_sound_data);;
@@ -108,10 +136,7 @@ let test_node_1 = { nodeId = 1; data = some_sound; executed = false; prev_date =
 let test_node_2 = { nodeId = 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
 next_node_id [ test_node_1; test_node_2 ] ;;
 
-
-
-let create_graph = { nodes = []; edges = [] } ;;
-
+(* get a new port id for when adding nodes to the graph *)
 let last_port_id graph =
   let list_nodes_id =
   List.map (fun node ->
@@ -122,15 +147,17 @@ let last_port_id graph =
      | Passthrough (ai, vi, ao, vo) -> max (max ai.audioPortId vi.valuePortId) (max ao.audioPortId vo.valuePortId) ;
   ) graph.nodes in
   List.fold_left max 0 list_nodes_id
-  ;;
+;;
 
-let update_vp_id vp new_id = { vp with valuePortId = new_id };;
-let update_ap_id ap new_id = { ap with audioPortId = new_id };;
-
+(* add a node to the data graph *)
 let add_node gr nodeDat =
+  let update_vp_id vp new_id = { vp with valuePortId = new_id } in
+  let update_ap_id ap new_id = { ap with audioPortId = new_id } in 
+
   (* each port is given an identifier to which each cable can connect to *)
   let new_id = next_node_id gr.nodes in
   let last_port_id = last_port_id gr in
+  
   let newNodeDat = match nodeDat with
    | Automation (ip, curve) -> Automation (update_vp_id ip (last_port_id + 1), curve) ;
    | Mapping (ip, op, curve) -> Mapping (update_vp_id ip (last_port_id + 1), update_vp_id ip (last_port_id + 2), curve) ;
@@ -145,10 +172,11 @@ let add_node gr nodeDat =
   (new_node, { gr with nodes = new_node::gr.nodes; })
 ;;
 
+(* add an edge between two ports of the data graph *)
 let add_edge gr src snk t =
   let new_id = next_edge_id gr.edges in
   let new_edge = { edgeId = new_id; source = src; sink = snk; edgeType = t } in
-  (new_edge, { nodes = gr.nodes; edges = new_edge::gr.edges })
+  (new_edge, { gr with edges = new_edge::gr.edges })
 ;;
 
 (* quick checks *)
@@ -169,13 +197,10 @@ let (snd1, test_g) = add_node test_g some_sound;;
 let (snd2, test_g) = add_node test_g some_sound;;
 let (p1, test_g) = add_node test_g some_passthrough;;
 
-(* let (e1, test_g) = add_edge snd1. *)
 
-let make_token dur pos off = { tokenDate = dur; position = pos; offset = off; start_discontinuous = false; end_discontinuous = false; };;
-let push_token token { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = tk; } =
-    { nodeId = id; data = dn; executed = e; prev_date = pd; tokens = token::tk; } ;;
-
-(* temporal model definitions *)
+(******************************
+ * temporal model definitions *
+ ******************************)
 type processImpl =
     Scenario of scenario | Loop of loop | None
 and process = {
@@ -210,6 +235,7 @@ and temporalCondition = {
 and scenario = {
     intervals: interval list ;
     triggers: temporalCondition list;
+    root_triggers: int list;
 }
 and loop = {
     pattern: interval;
@@ -222,40 +248,47 @@ let find_prev_condition itv scenario =
   let conditions = List.concat (List.map (fun t -> t.conds) scenario.triggers) in 
   List.find (fun ic -> (List.exists (fun id -> id == itv.itvId) ic.nextItv)) conditions
 ;;
+
 let find_next_condition itv scenario = 
   let conditions = List.concat (List.map (fun t -> t.conds) scenario.triggers) in 
   List.find (fun ic -> (List.exists (fun id -> id == itv.itvId) ic.previousItv)) conditions
 ;;
+
 let find_parent_trig cond scenario =
-  List.find (fun x -> (List.mem cond x.conds)) scenario.triggers ;;
+  List.find (fun x -> (List.mem cond x.conds)) scenario.triggers
+;;
   
 let find_end_trig itv scenario = 
-  let next_cond = find_next_condition itv scenario in 
-  find_parent_trig next_cond scenario;;
+  find_parent_trig (find_next_condition itv scenario) scenario
+;;
   
-let add_process interval proc = { interval with processes = proc::interval.processes };;
+let add_process interval proc = 
+  { interval with processes = proc::interval.processes }
+;;
 
 (* this supposes that the conditions and triggers are part of the scenario *)
 
-
 let add_interval sc inv = 
-let next_interval_id lst = next_id lst (fun n -> n.itvId) in
-{ sc with 
-  intervals = { inv with itvId = next_interval_id sc.intervals }::sc.intervals;
+  let next_interval_id lst = next_id lst (fun n -> n.itvId) in
+  { sc with 
+    intervals = { inv with itvId = next_interval_id sc.intervals }::sc.intervals;
 };;
+
 let add_trigger sc trg = 
-let next_trigger_id lst = next_id lst (fun n -> n.syncId) in
-{ sc with 
-  triggers = { trg with syncId = next_trigger_id sc.triggers }::sc.triggers 
+  let next_trigger_id lst = next_id lst (fun n -> n.syncId) in
+  { sc with 
+    triggers = { trg with syncId = next_trigger_id sc.triggers }::sc.triggers 
 };;
 
 let find_node graph nodeId = List.find (fun n -> n.nodeId == nodeId) graph.nodes;;
 let replace_node graph nodeId newNode =
-    { graph with 
-      nodes = List.map (fun n -> if n.nodeId == nodeId then newNode else n) graph.nodes; 
+  { graph with 
+    nodes = List.map (fun n -> if n.nodeId == nodeId then newNode else n) graph.nodes; 
 };;
 
 let graph_ident g = g;;
+
+(* register a tick to a node in the graph and return the new graph *)
 let add_tick_to_node nodeId token graph =
     (* tokens go from oldest to newest *)
     let node = (find_node graph nodeId) in
@@ -269,11 +302,63 @@ let add_tick_to_node nodeId token graph =
 (* These functions tick the temporal graph. They produce a pair :
  (new object, function to call on the data graph)
 *)
-let rec
-    tick_scenario s d p o = (Scenario s, graph_ident);
+let rec tick_loop s d p o = 
+  (Loop s, graph_ident);
 
-and tick_loop s d p o = (Loop s, graph_ident);
+(* actions & triggerings might happen on start / stop *)
+(* starting of processes *)
 
+(* when a scenario starts, we look up all the "root" temporal conditions : 
+   they are not preceded by any interval and start on the condition "true" *)
+and start_scenario s = 
+  let is_root trigger = 
+    (trigger.syncExpr == true_expression)
+    && 
+    (List.for_all (fun c -> c.previousItv == [ ]) trigger.conds)
+  in
+  
+  Scenario { 
+    s with root_triggers = 
+        (List.map (fun x -> x.syncId) (List.filter is_root s.triggers))
+   };
+
+and start_loop l = 
+   Loop l;
+  
+(* 
+For processes, add a first tick at t=0 when starting them.
+No samples will be produced so the offset does not matter. 
+*)
+and start_process p =
+    let res = match p.impl with
+    | Scenario s -> start_scenario s;
+    | Loop l -> start_loop l;
+    | None -> p.impl;
+    in (
+    { p with 
+          curTime = 0;
+          curOffset = 0;
+          curPos = 0.;
+          impl = res
+    }, 
+    (add_tick_to_node p.procNode (make_token 0 0. 0)) 
+);
+
+(* stopping of processes *)
+and stop_scenario s = 
+  (Scenario s, graph_ident);
+
+and stop_loop l = 
+  (Loop l, graph_ident);
+  
+and stop_process p =
+    let res = match p.impl with
+    | Scenario s -> stop_scenario s;
+    | Loop l -> stop_loop l;
+    | None -> (p.impl, graph_ident);
+    in ({ p with impl = tuple_first res}, tuple_second res);
+
+(* ticking of processes: increase the time. *)
 and tick_process newdate newpos offset (p: process) =
     let tick_res = match p.impl with
     | Scenario s -> tick_scenario s newdate newpos offset;
@@ -286,6 +371,7 @@ and tick_process newdate newpos offset (p: process) =
           impl = tuple_first tick_res
     }, tuple_second tick_res);
 
+(* ticking of intervals: aggregate all the ticks of the processes *)
 and tick_interval itv t offset =
     let new_date = (itv.date + t) in
     let new_pos = (float_of_int new_date /. float_of_int itv.nominalDuration) in
@@ -295,24 +381,17 @@ and tick_interval itv t offset =
        date = new_date;
        processes = (List.map tuple_first ticked_procs)
     },
-    (add_tick_to_node itv.itvNode (make_token new_date new_pos offset)) :: (List.map tuple_second ticked_procs))
+    (List.map tuple_second ticked_procs) @  [ add_tick_to_node itv.itvNode (make_token new_date new_pos offset) ] )
 
-    
-and tick_interval_safe itv t offset = 
-    (* tick a given interval without going past the max bound *)
-    match itv.maxDuration with 
-    | None -> tick_interval itv t offset
-    | Some tmax -> tick_interval itv (min t (tmax - itv.date)) offset
-    
 
 and start_interval itv t =
-    let ticked_procs = (List.map (tick_process 0 0. 0) itv.processes) in
+    let ticked_procs = (List.map start_process itv.processes) in
     ({ itv with
        date = 0;
        itvStatus = Waiting;
        processes = (List.map tuple_first ticked_procs)
     },
-    (add_tick_to_node itv.itvNode (make_token 0 0. 0)) :: (List.map tuple_second ticked_procs))
+    (List.map tuple_second ticked_procs) @ [ add_tick_to_node itv.itvNode (make_token 0 0. 0) ] )
 and stop_interval itv t = (*todo*)
     itv 
 
@@ -330,7 +409,7 @@ and scenario_event_dispose scenario event =
    let stopped_set = 0 in 
    (scenario, event, stopped_set) 
     
-      
+(* this functions ticks an interval in the context of a scenario *)
 and scenario_run_interval scenario interval overticks tick offset = 
   let itv_old_date = interval.date in 
   let end_node = find_end_trig interval scenario  in
@@ -348,15 +427,25 @@ and scenario_run_interval scenario interval overticks tick offset =
     | Some (min_ot, max_ot) ->
             let new_overtick = (min overtick min_ot, max overtick max_ot) in 
             (tick_res, list_assoc_replace overticks end_node.syncId new_overtick)
-  (*
-and scenario_process_tc scenario tc statusChangedEvents startedIntervals stoppedIntervals = 
+
+and scenario_process_trigger scenario tc statusChangedEvents startedIntervals stoppedIntervals = 
+  tc(* 
   let running_itvs = List.find (fun x -> x.date != 0) scenario.intervals in
   let itvMinDurReached itv = 
     let prev_ic = find_prev_condition itv in 
     prev_ic
     
   in
-  let minDurReached ev = List.map *)
+  let minDurReached ev = List.map  *)
+  
+and tick_scenario scenario dur pos offset =
+  let is_interval_running itv = 
+    itv.date != 0 && 
+    (find_next_condition itv scenario).status != Happened in
+    
+  let running_itvs = List.filter is_interval_running scenario.intervals in
+  
+  (Scenario scenario, graph_ident);
 ;;
 
 (** graph execution functions **)
@@ -605,7 +694,9 @@ let test_trig_4 = {
 };;
 let test_scenario = Scenario {
   intervals = [ test_itv_1; test_itv_2; test_itv_3 ];
-  triggers = [ test_trig_1; test_trig_2; test_trig_3; test_trig_4 ]}
+  triggers = [ test_trig_1; test_trig_2; test_trig_3; test_trig_4 ];
+  root_triggers = [ test_trig_1.syncId ];  
+}
 ;;
 
 let test_root = {
