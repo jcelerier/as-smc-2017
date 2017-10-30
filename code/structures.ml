@@ -578,6 +578,20 @@ and tick_scenario scenario dur pos offset =
     process root_trigger etc
     if no event status changed do nothing
     else remove trigger from roots
+    
+    for all running intervals
+      run them with the required tick
+    replace them in scenario
+    
+    do
+      for all event that happened
+        if event.node reached max
+          if overtick has a tick saved
+            run interval with remaining tick
+      clear pending events
+      for all end nodes
+        run nodes
+    while there are pending events
   *)
 
   (Scenario scenario, graph_ident);
