@@ -3,35 +3,41 @@
 let tuple_first (a, b) = a;;
 let tuple_second (a, b) = b;;
 
-let list_assoc_replace lst key newval = 
+let list_assoc_replace lst key newval =
   (key, newval) :: (List.remove_assoc key lst)
 ;;
-let list_count f lst = 
-  List.length (List.filter f lst) 
+let list_count f lst =
+  List.length (List.filter f lst)
 ;;
 
+let list_fun_combine lst =
+  List.fold_right
+    (fun f acc -> (fun x -> f (acc x)))
+    lst
+    (fun x -> x);;
+
 (* list of tuples to tuple of list *)
-let lot_to_tol2 lst = 
-  let rec lot_to_tol_rec sub (l1, l2) = 
-    match sub with 
+let lot_to_tol2 lst =
+  let rec lot_to_tol_rec sub (l1, l2) =
+    match sub with
     | [ ] -> (l1, l2);
-    | (a, b)::t -> lot_to_tol_rec t (l1@[a], l2@[b]) 
+    | (a, b)::t -> lot_to_tol_rec t (l1@[a], l2@[b])
   in
     lot_to_tol_rec lst ([], [])
 ;;
-let lot_to_tol3 lst = 
-  let rec lot_to_tol_rec sub (l1, l2, l3) = 
-    match sub with 
+let lot_to_tol3 lst =
+  let rec lot_to_tol_rec sub (l1, l2, l3) =
+    match sub with
     | [ ] -> (l1, l2, l3);
-    | (a, b, c)::t -> lot_to_tol_rec t (l1@[a], l2@[b], l3@[c]) 
+    | (a, b, c)::t -> lot_to_tol_rec t (l1@[a], l2@[b], l3@[c])
   in
     lot_to_tol_rec lst ([], [], [])
 ;;
 
 let lot_tol_test = lot_to_tol3 [ (1, 2, 3) ; (4, 5, 6) ] ;;
-(* given a function that returns identifiers for elements of a list, 
+(* given a function that returns identifiers for elements of a list,
    return the next biggest identifier *)
-let next_id lst f = 
+let next_id lst f =
   1 + (List.fold_left max 0 (List.map f lst))
 ;;
 
@@ -40,8 +46,8 @@ type duration = int;;
 type position = float;;
 
 (* a "None" optional duration means infinite: *)
-let is_infinite t = match t with 
-  | None -> true ; 
+let is_infinite t = match t with
+  | None -> true ;
   | _ -> false;;
 
 
@@ -111,20 +117,20 @@ type sound = audioPort * float array array;;
 type passthrough = audioPort * valuePort * audioPort * valuePort;;
 
 (* tokens *)
-type token_request = { 
-  tokenDate: duration; 
-  position: position; 
-  offset: duration; 
-  start_discontinuous: bool; 
-  end_discontinuous: bool; 
+type token_request = {
+  tokenDate: duration;
+  position: position;
+  offset: duration;
+  start_discontinuous: bool;
+  end_discontinuous: bool;
 };;
 
-let make_token dur pos off = 
-  { tokenDate = dur; 
-    position = pos; 
-    offset = off; 
-    start_discontinuous = false; 
-    end_discontinuous = false; 
+let make_token dur pos off =
+  { tokenDate = dur;
+    position = pos;
+    offset = off;
+    start_discontinuous = false;
+    end_discontinuous = false;
   };;
 
 (* nodes of the data graph *)
@@ -136,7 +142,7 @@ let create_graph = { nodes = []; edges = [] } ;;
 
 
 (* utilities and tests *)
-let push_token token node = 
+let push_token token node =
   { node with tokens = token::node.tokens }
 ;;
 
@@ -174,7 +180,7 @@ let last_port_id graph =
 (* add a node to the data graph *)
 let add_node gr nodeDat =
   let update_vp_id vp new_id = { vp with valuePortId = new_id } in
-  let update_ap_id ap new_id = { ap with audioPortId = new_id } in 
+  let update_ap_id ap new_id = { ap with audioPortId = new_id } in
 
   (* each port is given an identifier to which each cable can connect to *)
   let new_id = next_node_id gr.nodes in
@@ -202,14 +208,14 @@ let add_edge gr src snk t =
 ;;
 
 (* find a node in a graph by id *)
-let find_node graph nodeId = 
+let find_node graph nodeId =
   List.find (fun n -> n.nodeId == nodeId) graph.nodes
 ;;
 
 (* replace a node in a graph *)
 let replace_node graph nodeId newNode =
-  { graph with 
-    nodes = List.map (fun n -> if n.nodeId == nodeId then newNode else n) graph.nodes; 
+  { graph with
+    nodes = List.map (fun n -> if n.nodeId == nodeId then newNode else n) graph.nodes;
   };;
 
 let graph_ident g = g;;
@@ -218,9 +224,9 @@ let graph_ident g = g;;
 let add_tick_to_node nodeId token graph =
   (* tokens go from oldest to newest *)
   let node = (find_node graph nodeId) in
-  let new_node = { 
-    node with 
-    tokens = node.tokens @ [ token ]; 
+  let new_node = {
+    node with
+    tokens = node.tokens @ [ token ];
   } in
   replace_node graph nodeId new_node;;
 ;;
@@ -274,100 +280,102 @@ and condition = {
   status: status;
 }
 and temporalCondition = {
-  syncId: int;
+  tcId: int;
   syncExpr: expression;
   conds: condition list
 }
 and scenario = {
   intervals: interval list ;
-  triggers: temporalCondition list;
-  root_triggers: int list;
+  tempConds: temporalCondition list;
+  root_tempConds: int list;
 }
 and loop = {
   pattern: interval;
-  startTrig: temporalCondition;
-  endTrig: temporalCondition;
+  startTC: temporalCondition;
+  endTC: temporalCondition;
 };;
 
 (* utility functions to work with scenario *)
-let find_prev_condition itv scenario = 
-  let conditions = List.concat (List.map (fun t -> t.conds) scenario.triggers) in 
+let find_prev_IC itv scenario =
+  let conditions = List.concat (List.map (fun t -> t.conds) scenario.tempConds) in
   List.find (fun ic -> (List.exists (fun id -> id == itv.itvId) ic.nextItv)) conditions
 ;;
 
-let find_next_condition itv scenario = 
-  let conditions = List.concat (List.map (fun t -> t.conds) scenario.triggers) in 
+let find_next_IC itv scenario =
+  let conditions = List.concat (List.map (fun t -> t.conds) scenario.tempConds) in
   List.find (fun ic -> (List.exists (fun id -> id == itv.itvId) ic.previousItv)) conditions
 ;;
 
-let find_parent_trig cond scenario =
-  List.find (fun x -> (List.mem cond x.conds)) scenario.triggers
+let find_parent_TC cond scenario =
+  List.find (fun x -> (List.mem cond x.conds)) scenario.tempConds
 ;;
 
-let find_end_trig itv scenario = 
-  find_parent_trig (find_next_condition itv scenario) scenario
+let find_end_TC itv scenario =
+  find_parent_TC (find_next_IC itv scenario) scenario
 ;;
 
-let add_process interval proc = 
+let add_process interval proc =
   { interval with processes = proc::interval.processes }
 ;;
 
-let replace_trigger scenario tc = 
+let replace_TC scenario tc =
   { scenario with
-    triggers = List.map (fun x -> if x.syncId == tc.syncId then tc else x) scenario.triggers;
+    tempConds = List.map (fun x -> if x.tcId == tc.tcId then tc else x) scenario.tempConds;
   }
 ;;
 
-let replace_interval scenario itv = 
+let replace_interval scenario itv =
   { scenario with
     intervals = List.map (fun x -> if x.itvId == itv.itvId then itv else x) scenario.intervals;
   }
 ;;
 
-let get_intervals id_list scenario = 
+let get_intervals id_list scenario =
   List.filter (fun x -> List.mem x.itvId id_list) scenario.intervals;;
-    
-let replace_intervals scenario itvs = 
+let get_tempConds id_list scenario =
+  List.filter (fun x -> List.mem x.tcId id_list) scenario.tempConds;;
+
+let replace_intervals scenario itvs =
   List.fold_left replace_interval scenario itvs
 ;;
 
 let update_conds scenario tc iclist =
-  let new_tc = { tc with conds = iclist } in 
-  replace_trigger scenario new_tc
+  let new_tc = { tc with conds = iclist } in
+  replace_TC scenario new_tc
 ;;
-  
+
 (* These functions tick the temporal graph. They produce a pair :
    (new object, function to call on the data graph)
 *)
-let rec tick_loop s d p o = 
+let rec tick_loop s d p o =
   (Loop s, graph_ident);
 
   (* actions & triggerings might happen on start / stop *)
   (* starting of processes *)
 
-  (* when a scenario starts, we look up all the "root" temporal conditions : 
+  (* when a scenario starts, we look up all the "root" temporal conditions :
      they are not preceded by any interval and start on the condition "true" *)
-and start_scenario s = 
-  let is_root trigger = 
-    (trigger.syncExpr == true_expression)
-    && 
-    (List.for_all (fun c -> c.previousItv == [ ]) trigger.conds)
+and start_scenario s =
+  let is_root tc =
+    (tc.syncExpr == true_expression)
+    &&
+    (List.for_all (fun c -> c.previousItv == [ ]) tc.conds)
   in
-  Scenario { 
-    s with 
-    root_triggers = 
-             (List.map (fun x -> x.syncId) (List.filter is_root s.triggers))
+  Scenario {
+    s with
+    root_tempConds =
+             (List.map (fun x -> x.tcId) (List.filter is_root s.tempConds))
   };
 
-and start_loop l = 
+and start_loop l =
   Loop l;
 
-(* 
+(*
 For processes, add a first tick at t=0 when starting them.
-No samples will be produced so the offset does not matter. 
+No samples will be produced so the offset does not matter.
 *)
 and start_process p =
-    ({ p with 
+    ({ p with
       curTime = 0;
       curOffset = 0;
       curPos = 0.;
@@ -375,15 +383,15 @@ and start_process p =
              | Scenario s -> start_scenario s;
              | Loop l -> start_loop l;
              | None -> p.impl
-    }, 
-    (add_tick_to_node p.procNode (make_token 0 0. 0)) 
+    },
+    add_tick_to_node p.procNode (make_token 0 0. 0)
   );
 
   (* stopping of processes *)
-and stop_scenario s = 
+and stop_scenario s =
   (Scenario s, graph_ident);
 
-and stop_loop l = 
+and stop_loop l =
   (Loop l, graph_ident);
 
 and stop_process p =
@@ -399,7 +407,7 @@ and tick_process newdate newpos offset p =
     | Scenario s -> tick_scenario s newdate newpos offset;
     | Loop l -> tick_loop l newdate newpos offset;
     | None -> (p.impl, graph_ident);
-  in ({ p with 
+  in ({ p with
         curTime = p.curTime + newdate;
         curOffset = offset;
         curPos = newpos;
@@ -426,78 +434,80 @@ and start_interval itv =
      itvStatus = Waiting;
      processes = (List.map tuple_first ticked_procs)
    },
-   (List.map tuple_second ticked_procs) @ [ add_tick_to_node itv.itvNode (make_token 0 0. 0) ] )
+    ((List.map tuple_second ticked_procs) @ [ add_tick_to_node itv.itvNode (make_token 0 0. 0) ]) )
 
 and stop_interval itv = (*todo*)
-  itv 
+  itv
 
-and scenario_ic_happen scenario ic = 
+and scenario_ic_happen scenario ic =
   (* mark ic as executed, add previous intervals to stop set, next intervals to start set *)
   let started_set = ic.nextItv in
   let stopped_set = ic.previousItv in
   ({ ic with status = Happened }, started_set, stopped_set)
 
-and scenario_ic_dispose scenario ic = 
-  (* mark ic as disposed, 
-     add previous intervals to stop set, 
-     disable next intervals, 
+and scenario_ic_dispose scenario ic =
+  (* mark ic as disposed,
+     add previous intervals to stop set,
+     disable next intervals,
      disable next ics if all of their previous intervals are disabled *)
   let stopped_set = ic.previousItv in
-  ({ ic with status = Disposed }, [ ], stopped_set) 
+  ({ ic with status = Disposed }, [ ], stopped_set)
 
-(* this functions ticks an interval in the context of a scenario *)
-and scenario_run_interval scenario interval overticks tick offset = 
-  let end_node = find_end_trig interval scenario in
-  
-  match interval.maxDuration with   
+(* this functions ticks an interval in the context of a scenario.
+   it returns ( (new_interval, list of functions to apply), overticks )
+ *)
+and scenario_run_interval scenario overticks tick offset interval =
+  let end_TC = find_end_TC interval scenario in
+
+  match interval.maxDuration with
     (* if there is no max, we can go to the whole length of the tick *)
     | None -> (tick_interval interval tick offset, overticks)
-  
+
     (* if there is a max, we have to stop at the max and save the remainings *)
-    | Some maxdur -> 
+    | Some maxdur ->
       let actual_tick = min tick (maxdur - interval.date) in
-      let tick_res = tick_interval interval actual_tick offset in 
-      let overtick = tick - (maxdur - interval.date) in 
-    
-      (* find if there was already over-ticks recorded for this trigger, and if so, update them *)
-      match List.assoc_opt end_node.syncId overticks with 
-        | None -> (tick_res, (end_node.syncId, (overtick, overtick))::overticks)
+      let tick_res = tick_interval interval actual_tick offset in
+      let overtick = tick - (maxdur - interval.date) in
+
+      (* find if there was already over-ticks recorded for this TC, and if so, update them *)
+      match List.assoc_opt end_TC.tcId overticks with
+        | None -> (tick_res, (end_TC.tcId, (overtick, overtick))::overticks)
         | Some (min_ot, max_ot) ->
-            let new_overtick = (min overtick min_ot, max overtick max_ot) in 
-            (tick_res, list_assoc_replace overticks end_node.syncId new_overtick)
+            let new_overtick = (min overtick min_ot, max overtick max_ot) in
+            (tick_res, list_assoc_replace overticks end_TC.tcId new_overtick)
 
 (* this function does the evaluation & execution of a given temporal condition *)
-and scenario_process_trigger scenario tc statusChangedEvents = 
+and scenario_process_TC scenario tc  =
 
   (**** utilities ****)
-  
-  (* minDurReached ev == true iff all the non-disposed previous intervals 
+
+  (* minDurReached ic == true iff all the non-disposed previous intervals
      have reached their min duration *)
-  let minDurReached ev = 
+  let minDurReached ic =
     (* find the intervals in the evaluation area *)
-    let min_reached itv = 
+    let min_reached itv =
       (itv.date >= itv.minDuration) ||
-      (find_prev_condition itv scenario).status == Disposed
+      (find_prev_IC itv scenario).status == Disposed
     in
-    List.for_all min_reached (get_intervals ev.previousItv scenario)
+    List.for_all min_reached (get_intervals ic.previousItv scenario)
   in
-  
-  (* maxDurReached ev == true iff any of the previous intervals 
+
+  (* maxDurReached ic == true iff any of the previous intervals
      have reached their max duration *)
-  let maxDurReached ev = 
-    let max_reached itv = 
-       match itv.maxDuration with 
+  let maxDurReached ic =
+    let max_reached itv =
+       match itv.maxDuration with
        | None -> false
        | Some t -> itv.date >= t
     in
-    List.exists max_reached (get_intervals ev.previousItv scenario)
+    List.exists max_reached (get_intervals ic.previousItv scenario)
   in
-  
+
   (* execution of a given instantaneous condition *)
   (* returns (ic, started intervals, stopped intervals *)
   let execute_ic scenario ic =
     let ic = { ic with condExpr = update ic.condExpr } in
-    if evaluate ic.condExpr 
+    if evaluate ic.condExpr
     then
       scenario_ic_happen scenario ic
     else
@@ -505,96 +515,135 @@ and scenario_process_trigger scenario tc statusChangedEvents =
   in
 
   (* execution of a given temporal condition *)
-  (* returns (new_scenario, [ functions to apply to the data graph]) *)
-  let execute_tc scenario tc = 
+  (* returns (new_scenario, [ instantaneous conditions that executed ], [ functions to apply to the data graph ]) *)
+  let execute_tc scenario tc =
     (* execute the conditions *)
-    let (new_conds, started_itv_ids, ended_itv_ids) = 
-        lot_to_tol3 (List.map (execute_ic scenario) tc.conds) in 
-    
+    let (new_conds, started_itv_ids, ended_itv_ids) =
+        lot_to_tol3 (List.map (execute_ic scenario) tc.conds) in
+
     (* start and stop the intervals *)
-    let ended_intervals = 
-        List.map 
+    let ended_intervals =
+        List.map
             stop_interval
-            (get_intervals (List.flatten ended_itv_ids) scenario) in 
-    let (started_intervals, funs) = lot_to_tol2 
-        (List.map 
-            start_interval 
-            (get_intervals (List.flatten started_itv_ids) scenario)) in 
-    
-    (* replace the conditions by the new ones, same for the intervals. 
+            (get_intervals (List.flatten ended_itv_ids) scenario) in
+    let (started_intervals, funs) = lot_to_tol2
+        (List.map
+            start_interval
+            (get_intervals (List.flatten started_itv_ids) scenario)) in
+
+    let funs = List.flatten funs in
+    (* replace the conditions by the new ones, same for the intervals.
        besides, we also keep the functions generated by the start of intervals *)
-    (replace_intervals 
-        (replace_trigger scenario { tc with conds = new_conds })
+    (replace_intervals
+        (replace_TC scenario { tc with conds = new_conds })
         (ended_intervals@started_intervals)
+    , new_conds
     , funs)
   in
-  
+
   (**** actual execution ****)
-  
+
   (* mark all instantaneous conditions with min reached as Pending *)
-  let updConds = 
-    List.map 
-      (fun x -> if minDurReached x then { x with status = Pending } else x) 
+  let updConds =
+    List.map
+      (fun x -> if minDurReached x then { x with status = Pending } else x)
       tc.conds
   in
-  
+
   (* amongst all the pending ones, we check if any has reached its max *)
-  let tcMaxDurReached = 
-    List.exists 
-      (fun ev -> ev.status == Pending && maxDurReached ev) 
+  let tcMaxDurReached =
+    List.exists
+      (fun ic -> ic.status == Pending && maxDurReached ic)
       updConds
-  in 
-  
+  in
+
   (* replace them in the scenario *)
   let scenario = (update_conds scenario tc updConds) in
-  
-  (* if not all events are pending or disposed *)
+
+  (* if not all ICs are pending or disposed *)
   if (not (List.for_all (fun x -> x.status == Pending || x.status == Disposed) updConds))
   then
-    (scenario, [ ])
+    (scenario, [ ], [ ])
   else
     if ((tc.syncExpr != true_expression) && (not tcMaxDurReached))
     then
       let tc = { tc with syncExpr = update tc.syncExpr } in
-      
+
       if (not (evaluate tc.syncExpr))
       then
-        (* expression is false, do nothing apart updating the trigger *)
-        (replace_trigger scenario tc, [ ])
-      else 
+        (* expression is false, do nothing apart updating the TC *)
+        (replace_TC scenario tc, [ ], [ ])
+      else
         (* the tc expression is true, we can proceed with the execution of what follows *)
-        execute_tc scenario tc        
+        execute_tc scenario tc
     else
      (* max reached or true expression, we can execute the temporal condition  *)
      execute_tc scenario tc
-  
-and tick_scenario scenario dur pos offset =
-  let is_interval_running itv = 
-    itv.date != 0 && 
-    (find_next_condition itv scenario).status != Happened in
 
-  let running_itvs = List.filter is_interval_running scenario.intervals in
-  (* for all root_triggers 
-    process root_trigger etc
-    if no event status changed do nothing
-    else remove trigger from roots
-    
-    for all running intervals
-      run them with the required tick
-    replace them in scenario
-    
+and tick_scenario scenario dur pos offset =
+  let is_interval_running itv =
+    itv.date != 0 &&
+    (find_next_IC itv scenario).status != Happened in
+
+  (* execute the list of root TCs.
+     l1 : list of executed ICs
+     l2 : list of resulting functions  *)
+  let rec process_root_tempConds scenario tc_list (l1, l2) =
+    match tc_list with
+    | [ ] -> (scenario, l1, l2)
+    | h::t ->
+        (* try to execute the TC *)
+        let (scenario, conds, funs) =
+            scenario_process_TC scenario h in
+        if (List.length conds) == 0 then
+          (* No new IC, the trigger wasn't executed, we keep it *)
+          (* note: the user interface enforces that a TC always has at least a single IC *)
+          process_root_tempConds scenario t ((conds @ l1), (funs @ l2))
+        else
+          (* the TC was executed, remove it from the roots *)
+          process_root_tempConds
+            { scenario with root_tempConds = List.filter (fun x -> x != h.tcId) scenario.root_tempConds }
+            t
+            ((conds @ l1), (funs @ l2))
+  in
+
+  (* execute a list of intervals *)
+  let rec process_intervals scenario itv_list overticks funs dur pos offset =
+    match itv_list with
+    | [ ] -> (scenario, overticks, funs)
+    | interval::t ->
+        (* run the interval and replace it in a new scenario *)
+        let ((new_itv, new_funs), overticks) =
+            scenario_run_interval scenario overticks dur offset interval in
+        let scenario = replace_interval scenario new_itv in
+        process_intervals scenario t overticks (funs@new_funs) dur pos offset
+  in
+
+  (* execute the biggest part of the tick *)
+  let rt = get_tempConds scenario.root_tempConds scenario in
+
+  let (scenario, conds, cond_funcs) = process_root_tempConds scenario rt ([], []) in
+
+  let running_itvs sc = List.filter is_interval_running sc.intervals in
+  let cur_end_TCs = List.map
+    (fun itv -> (find_end_TC itv scenario).tcId)
+    (running_itvs scenario) in
+  let (scenario, overticks, itv_funcs) =
+    process_intervals scenario (running_itvs scenario) [] [] dur pos offset in
+  (Scenario scenario, list_fun_combine (cond_funcs@itv_funcs))
+
+  (* still have to do :
     do
-      for all event that happened
-        if event.node reached max
+      for all ICs that happened
+        if IC.node reached max
           if overtick has a tick saved
             run interval with remaining tick
-      clear pending events
+      clear pending ICs
       for all end nodes
         run nodes
-    while there are pending events
+    while there are pending ICs
   *)
 
-  (Scenario scenario, graph_ident);
 ;;
 
 (** graph execution functions **)
@@ -643,7 +692,7 @@ let exec_node_impl data token =
 ;;
 
 let exec_node g n token =
-  { n with 
+  { n with
     data = exec_node_impl n.data token;
     executed = true;
     prev_date = token.tokenDate;
@@ -801,8 +850,8 @@ let test_itv_3 = {
   ];
 };;
 
-let test_trig_1 = {
-  syncId = 1;
+let test_TC_1 = {
+  tcId = 1;
   syncExpr = true_expression;
   conds = [ {
       condExpr = true_expression;
@@ -811,8 +860,8 @@ let test_trig_1 = {
       status = Waiting;
     } ];
 };;
-let test_trig_2 = {
-  syncId = 2;
+let test_TC_2 = {
+  tcId = 2;
   syncExpr = true_expression;
   conds = [ {
       condExpr = true_expression;
@@ -821,8 +870,8 @@ let test_trig_2 = {
       status = Waiting;
     } ];
 };;
-let test_trig_3 = {
-  syncId = 3;
+let test_TC_3 = {
+  tcId = 3;
   syncExpr = true_expression;
   conds = [ {
       condExpr = true_expression;
@@ -831,8 +880,8 @@ let test_trig_3 = {
       status = Waiting;
     } ];
 };;
-let test_trig_4 = {
-  syncId = 4;
+let test_TC_4 = {
+  tcId = 4;
   syncExpr = true_expression;
   conds = [ {
       condExpr = true_expression;
@@ -843,8 +892,8 @@ let test_trig_4 = {
 };;
 let test_scenario = Scenario {
     intervals = [ test_itv_1; test_itv_2; test_itv_3 ];
-    triggers = [ test_trig_1; test_trig_2; test_trig_3; test_trig_4 ];
-    root_triggers = [ test_trig_1.syncId ];  
+    tempConds = [ test_TC_1; test_TC_2; test_TC_3; test_TC_4 ];
+    root_tempConds = [ test_TC_1.tcId ];
   }
 ;;
 
@@ -879,7 +928,7 @@ let (test_g, env) = tick_graph_topo test_g env in
 
 let temporal_tick_res = tick_interval (tuple_first temporal_tick_res) 100 0 in
 let test_g = update_graph (tuple_second temporal_tick_res) test_g in
-let (test_g, env) = tick_graph_topo test_g env in 
+let (test_g, env) = tick_graph_topo test_g env in
 test_g ;;
 
 
