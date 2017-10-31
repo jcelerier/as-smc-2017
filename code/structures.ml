@@ -332,7 +332,7 @@ let replace_interval scenario itv =
 
 let get_intervals id_list scenario =
   List.filter (fun x -> List.mem x.itvId id_list) scenario.intervals;;
-let get_tempConds id_list scenario =
+let get_temporalConds id_list scenario =
   List.filter (fun x -> List.mem x.tcId id_list) scenario.tempConds;;
 
 let replace_intervals scenario itvs =
@@ -615,12 +615,13 @@ and tick_scenario scenario dur pos offset =
         (* run the interval and replace it in a new scenario *)
         let ((new_itv, new_funs), overticks) =
             scenario_run_interval scenario overticks dur offset interval in
-        let scenario = replace_interval scenario new_itv in
-        process_intervals scenario t overticks (funs@new_funs) dur pos offset
+        process_intervals
+         (replace_interval scenario new_itv)
+         t overticks (funs@new_funs) dur pos offset
   in
 
   (* execute the biggest part of the tick *)
-  let rt = get_tempConds scenario.root_tempConds scenario in
+  let rt = get_temporalConds scenario.root_tempConds scenario in
 
   let (scenario, conds, cond_funcs) = process_root_tempConds scenario rt ([], []) in
 
@@ -698,7 +699,10 @@ let exec_node g n token =
     prev_date = token.tokenDate;
   };;
 
-let remove_node l nodeId = List.filter (fun x -> x.nodeId == nodeId) l ;;
+let remove_node l nodeId = List.filter (fun x -> x.nodeId != nodeId) l ;;
+
+let nodes = [ { nodeId= 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]}; { nodeId= 2; data = some_sound; executed = false; prev_date = 0; tokens = [ ] } ] in
+remove_node nodes 1;;
 
 (* clear the inputs of a node, and copy its outputs to the environment & delay lines *)
 let teardown_node n g e = (n, g, e);;
@@ -779,13 +783,19 @@ let rec sub_tick graph nodes e =
       let graph = replace_node graph cur_node.nodeId cur_node in
       sub_tick graph (remove_node next_nodes cur_node.nodeId) e ;;
 
-
 let tick_graph_topo graph e =
   (* we mark the nodes which had tokens posted to as enabled *)
   let enabled_nodes = disable_strict_nodes (List.filter is_enabled graph.nodes) in
   let sorted_nodes = topo_sort graph in
   let filtered_nodes = List.filter (fun n -> (List.mem n enabled_nodes)) sorted_nodes in
   sub_tick graph filtered_nodes e;;
+
+
+(* tests *)
+
+let nodes = [ { nodeId= 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]}; { nodeId= 2; data = some_sound; executed = false; prev_date = 0; tokens = [ ] } ] in
+remove_node nodes 1;;
+
 
 (* Complete example: 2-track sequencer *)
 (* 1. Create data graph *)
@@ -820,6 +830,8 @@ let test_itv_1 = {
     }
   ];
 };;
+
+tick_interval test_itv_1 100 0 ;;
 
 let test_itv_2 = {
   itvId = 2;
@@ -897,6 +909,14 @@ let test_scenario = Scenario {
   }
 ;;
 
+
+tick_scenario {
+    intervals = [ test_itv_1; test_itv_2; test_itv_3 ];
+    tempConds = [ test_TC_1; test_TC_2; test_TC_3; test_TC_4 ];
+    root_tempConds = [ test_TC_1.tcId ];
+  } 100 0.1 0 ;;
+exit 0;;
+
 let test_root = {
   itvId = 1; (* we can reuse the id 1 since it's a different hierarchy level *)
   itvNode = itv_node_4.nodeId;
@@ -916,7 +936,9 @@ let test_root = {
     }
   ]
 };;
-(*
+let env = 0;;
+let temporal_tick_res = tick_interval test_root 100 0 ;;
+
 let env = 0;;
 let temporal_tick_res = tick_interval test_root 100 0  in
 let test_g = update_graph (tuple_second temporal_tick_res) test_g in
@@ -932,4 +954,4 @@ let (test_g, env) = tick_graph_topo test_g env in
 test_g ;;
 
 
-*)
+
