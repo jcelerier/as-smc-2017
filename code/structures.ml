@@ -354,7 +354,7 @@ let update_conds scenario tc iclist =
    (new object, function to call on the data graph)
 *)
 let rec tick_loop s d p o =
-  (Loop s, graph_ident);
+  (s, graph_ident);
 
   (* actions & triggerings might happen on start / stop *)
   (* starting of processes *)
@@ -410,8 +410,8 @@ and stop_process p =
   (* ticking of processes: increase the time. *)
 and tick_process newdate newpos offset p =
   let tick_res = match p.impl with
-    | Scenario s -> tick_scenario s newdate newpos offset;
-    | Loop l -> tick_loop l newdate newpos offset;
+    | Scenario s -> let (p, f) = tick_scenario s newdate newpos offset in (Scenario p, f);
+    | Loop l -> let (p, f) = tick_loop l newdate newpos offset; in (Loop p, f);
     | None -> (p.impl, graph_ident);
   in ({ p with
         curTime = p.curTime + newdate;
@@ -611,17 +611,31 @@ and tick_scenario scenario dur pos offset =
             ((conds @ l1), (funs @ l2))
   in
 
+  (* execute a given list of TCs *)
+  let rec process_tempConds scenario tc_list (l1, l2) =
+    match tc_list with
+    | [ ] -> (scenario, l1, l2)
+    | h::t ->
+        (* try to execute the TC *)
+        let (scenario, conds, funs) =
+            scenario_process_TC scenario h in
+        process_tempConds scenario t ((conds @ l1), (funs @ l2))
+  in
+
   (* execute a list of intervals *)
-  let rec process_intervals scenario itv_list overticks funs dur pos offset =
+  let rec process_intervals scenario itv_list overticks funs dur pos offset end_TCs =
     match itv_list with
-    | [ ] -> (scenario, overticks, funs)
+    | [ ] -> (scenario, overticks, end_TCs, funs)
     | interval::t ->
         (* run the interval and replace it in a new scenario *)
         let ((new_itv, new_funs), overticks) =
             scenario_run_interval scenario overticks dur offset interval in
         process_intervals
          (replace_interval scenario new_itv)
-         t overticks (funs@new_funs) dur pos offset
+         t overticks 
+         (funs@new_funs) 
+         dur pos offset 
+         ((find_end_TC new_itv scenario)::end_TCs)
   in
 
   (* execute the biggest part of the tick *)
@@ -630,12 +644,13 @@ and tick_scenario scenario dur pos offset =
   let (scenario, conds, cond_funcs) = process_root_tempConds scenario rt ([], []) in
 
   let running_itvs sc = List.filter (is_interval_running sc) sc.intervals in
-  let cur_end_TCs = List.map
-    (fun itv -> (find_end_TC itv scenario).tcId)
-    (running_itvs scenario) in
-  let (scenario, overticks, itv_funcs) =
-    process_intervals scenario (running_itvs scenario) [] [] dur pos offset in
-  (Scenario scenario, list_fun_combine (cond_funcs@itv_funcs))
+  
+  let (scenario, overticks, end_TCs, itv_funcs) =
+    process_intervals scenario (running_itvs scenario) [] [] dur pos offset [] in
+
+  let (scenario, conds, cond_funcs) = process_tempConds scenario end_TCs ([], []) in
+    
+  (scenario, list_fun_combine (cond_funcs@itv_funcs))
 
   (* still have to do :
     do
@@ -860,7 +875,7 @@ let test_itv_1 = {
   maxDuration = Some 5000;
   nominalDuration = 5000;
   date = 0; itvStatus = Waiting;
-  processes = [
+  processes = [ (*
     {
       procNode = snd_node_1.nodeId;
       procEnable = false;
@@ -868,7 +883,7 @@ let test_itv_1 = {
       curOffset = 0;
       curPos = 0.;
       impl = None;
-    }
+    } *)
   ];
 } in
 
@@ -974,7 +989,7 @@ let test_root = {
   ]
 } in
 let env = 0 in
-main_loop test_root test_g 20000 1000 env;;
+(* main_loop test_root test_g 20000 1000 env;; *)
 (* tick_interval test_itv_1 100 0 in *)
 (*
 replace_intervals {
@@ -992,14 +1007,15 @@ replace_intervals {
 }  ] ;;
 *)
 
-(*
+let (ts, f) =
 tick_scenario {
-    intervals = [ test_itv_1; test_itv_2; test_itv_3 ];
-    tempConds = [ test_TC_1; test_TC_2; test_TC_3; test_TC_4 ];
+    intervals = [ test_itv_1; test_itv_2 ];
+    tempConds = [ test_TC_1; test_TC_2; test_TC_3 ];
     root_tempConds = [ test_TC_1.tcId ];
-  } 100 0.1 0 ;;
+  } 6000 0.1 0 
+  in tick_scenario ts 1000 0.1 0 ;;
 exit 0;;
-*)
+
 
 (*
 type environment = {
