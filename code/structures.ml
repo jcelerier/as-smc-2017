@@ -1,7 +1,6 @@
-
-
-(* utility *)
-
+(***********
+ * utility *
+ ***********)
 let tuple_first (a, b) = a;;
 let tuple_second (a, b) = b;;
 
@@ -43,7 +42,11 @@ let next_id lst f =
   1 + (List.fold_left max 0 (List.map f lst))
 ;;
 
-(* base types *)
+
+
+(**************
+ * base types *
+ **************)
 type duration = int;;
 type position = float;;
 
@@ -53,70 +56,110 @@ let is_infinite t = match t with
   | _ -> false;;
 
 
+
 (*************
  * data tree *
  *************)
-type value = Float of float | Int of int | Bool of bool | String of string;;
-type valueParameter = value;;
-type audioParameter = float array array;;
-type parameter = ValueParam of valueParameter;;
-type node = { name: string; param: parameter option; children: node list; };;
 
-let test_p = ValueParam (Float 3.4) ;;
-let test_n = { name = "foo"; param = Some test_p; children = [] } ;;
+type value = 
+  | Float of float
+  | Int of int
+  | Bool of bool
+  | String of string
+  | Audio of float array array;;
 
-let pull p = match p with
-  | ValueParam v -> v ;;
-let push p nv = match p with
-  | ValueParam v -> ValueParam nv ;;
+type node = { name: string; param: value option; children: node list; };;
+
+type env = string -> value;;
+let pull var e = (e var);;
+let push var va e = fun v -> if v = var then va else (e var);;
+
+
 
 
 (***************
  * expressions *
  ***************)
-type binop = And | Or | Xor;;
-type comparator = Greater | GreaterEq | Lower | LowerEq | Equal | Different ;;
-type atomElement = AtomParam of parameter | AtomValue of value ;;
-type atom = atomElement * atomElement * comparator
-and negation = expression
-and composition = expression * expression * binop
-and impulse = parameter * bool
-and expression = Atom of atom | Negation of negation | Composition of composition | Impulse of impulse ;;
+ 
+ 
+exception UndefinedVariable
+let noenv = fun v -> raise UndefinedVariable
 
-(* Deux expressions utiles *)
-let true_expression = Atom ((AtomValue (Bool true)), (AtomValue (Bool true)), Equal);;
-let false_expression = Atom ((AtomValue (Bool true)), (AtomValue (Bool true)), Different);;
+type subexpr = Var of string | Value of value;;
+type expression =
+  | Greater of subexpr*subexpr
+  | GreaterEq of subexpr*subexpr
+  | Lower of subexpr*subexpr
+  | LowerEq of subexpr*subexpr
+  | Equal of subexpr*subexpr
+  | Different of subexpr*subexpr
+  | Negation of expression
+  | And of expression*expression
+  | Or of expression*expression
+  | Impulse of string*bool
+;;
 
-(* quick checks *)
-let test_atom = Atom ((AtomValue (Float 3.4)), (AtomValue (Float 4.5)), Greater);;
-let test_comp = Composition (test_atom, test_atom, Or);;
+exception EvalError;;
 
-(* TODO mais pas nécessairement pour l'article *)
-let evaluate expr = true ;;
+let fbbb v1 v2 f =
+  match (v1, v2) with
+    | (Bool b1, Bool b2) -> f b1 b2
+    | _,_ -> raise EvalError
+    
+let fiib v1 v2 f e =
+  match (v1,v2) with
+    | (Var n1, Var n2) -> fbbb (e n1) (e n2) f
+    | (Var n1, Value n2) -> fbbb (e n1) n2 f
+    | (Value n1, Var n2) -> fbbb n1 (e n2) f
+    | (Value n1, Value n2) -> fbbb n1 n2 f
+
+
+let fbb v1 f =
+  match v1 with
+    | Bool b1 -> Bool (f b1)
+    | _ -> raise EvalError
+
+let rec evaluate expr e = 
+ match expr with
+  | Greater (e1,e2)   -> fiib e1 e2 (>) e
+  | GreaterEq (e1,e2) -> fiib e1 e2 (>=) e
+  | Lower (e1,e2)     -> fiib e1 e2 (<) e
+  | LowerEq (e1,e2)   -> fiib e1 e2 (<=) e
+  | Equal (e1,e2)     -> fiib e1 e2 (=) e
+  | Different (e1,e2) -> fiib e1 e2 (!=) e
+  | Negation e1       -> not (evaluate e1 e)
+  | And (e1,e2)       -> (evaluate e1 e) && (evaluate e2 e)
+  | Or (e1,e2)        -> (evaluate e1 e) || (evaluate e2 e)
+  | Impulse (v,b)     -> b (* instead, check if the env contains the value ? *)
+
+
+(* two useful expressions *)
+let true_expression = Equal (Value (Bool true), Value (Bool true));;
+let false_expression = Equal (Value (Bool true), Value (Bool false));;
+
 let update expr = expr ;;
 
 type status = Waiting | Pending | Happened | Disposed;;
 
+
+
 (**************
  * data model *
  **************)
-
 (* ports *)
 type edgeType = Glutton | Strict | Delayed ;;
 type edge = { edgeId: int; source: int; sink: int; edgeType: edgeType; }
-and audioPort = { audioPortId: int; audioPortAddr: audioParameter option; audioEdges: edge list }
-and valuePort = { valuePortId: int; valuePortAddr: valueParameter option; valueEdges: edge list }
-and port = AudioPort of audioPort | ValuePort of valuePort
+and port = { portId: int; portAddr: string option; portEdges: int list }
 ;;
 
 type curve = (float * float) list ;;
 let value_at curve x = 0.0;;
 
 (* some specific nodes *)
-type automation = valuePort * curve;;
-type mapping = valuePort * valuePort * curve;;
-type sound = audioPort * float array array;;
-type passthrough = audioPort * valuePort * audioPort * valuePort;;
+type automation = port * curve;;
+type mapping = port * port * curve;;
+type sound = port * float array array;;
+type passthrough = port * port;;
 
 (* tokens *)
 type token_request = {
@@ -151,52 +194,36 @@ let push_token token node =
 let next_node_id lst = next_id lst (fun n -> n.nodeId);;
 let next_edge_id lst = next_id lst (fun n -> n.edgeId);;
 
-let create_audio_port = { audioPortId = 0; audioPortAddr = None; audioEdges = []; } ;;
-let create_value_port = { valuePortId = 0; valuePortAddr = None; valueEdges = []; } ;;
-
-(* test *)
-let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
-let some_sound_data = Array.make 2 (Array.make 8 0.);;
-let some_sound = Sound (create_audio_port, some_sound_data);;
-
-let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
-
-(* test *)
-let test_node_1 = { nodeId = 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
-let test_node_2 = { nodeId = 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
-next_node_id [ test_node_1; test_node_2 ] ;;
+let create_port = { portId = 0; portAddr = None; portEdges = []; } ;;
 
 (* get a new port id for when adding nodes to the graph *)
 let last_port_id graph =
   let list_nodes_id =
     List.map (fun node ->
         match node.data with
-        | Automation (ip, _) -> ip.valuePortId ;
-        | Mapping (ip, op, _) -> max ip.valuePortId op.valuePortId ;
-        | Sound (op, _) -> op.audioPortId ;
-        | Passthrough (ai, vi, ao, vo) -> max (max ai.audioPortId vi.valuePortId) (max ao.audioPortId vo.valuePortId) ;
+        | Automation (ip, _) -> ip.portId ;
+        | Mapping (ip, op, _) -> max ip.portId op.portId ;
+        | Sound (op, _) -> op.portId ;
+        | Passthrough (ip, op) -> max ip.portId op.portId ;
       ) graph.nodes in
   List.fold_left max 0 list_nodes_id
 ;;
 
 (* add a node to the data graph *)
 let add_node gr nodeDat =
-  let update_vp_id vp new_id = { vp with valuePortId = new_id } in
-  let update_ap_id ap new_id = { ap with audioPortId = new_id } in
+  let update_port_id vp new_id = { vp with portId = new_id } in
 
   (* each port is given an identifier to which each cable can connect to *)
   let new_id = next_node_id gr.nodes in
   let last_port_id = last_port_id gr in
 
   let newNodeDat = match nodeDat with
-    | Automation (ip, curve) -> Automation (update_vp_id ip (last_port_id + 1), curve) ;
-    | Mapping (ip, op, curve) -> Mapping (update_vp_id ip (last_port_id + 1), update_vp_id ip (last_port_id + 2), curve) ;
-    | Sound (op, audio) -> Sound (update_ap_id op (last_port_id + 1), audio) ;
-    | Passthrough (ai, vi, ao, vo) -> Passthrough (
-        update_ap_id ai (last_port_id + 1),
-        update_vp_id vi (last_port_id + 2),
-        update_ap_id ao (last_port_id + 3),
-        update_vp_id vo (last_port_id + 4));
+    | Automation (ip, curve) -> Automation (update_port_id ip (last_port_id + 1), curve) ;
+    | Mapping (ip, op, curve) -> Mapping (update_port_id ip (last_port_id + 1), update_port_id ip (last_port_id + 2), curve) ;
+    | Sound (op, audio) -> Sound (update_port_id op (last_port_id + 1), audio) ;
+    | Passthrough (ip, op) -> Passthrough (
+        update_port_id ip (last_port_id + 1),
+        update_port_id op (last_port_id + 2));
   in
   let new_node = { nodeId = new_id; data = newNodeDat; executed = false; prev_date = 0; tokens = [ ]; } in
   (new_node, { gr with nodes = new_node::gr.nodes; })
@@ -233,23 +260,7 @@ let add_tick_to_node nodeId token graph =
   replace_node graph nodeId new_node;;
 ;;
 
-(* quick checks *)
-let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
-let some_sound_data = Array.make 2 (Array.make 8 0.);;
-let some_sound = Sound (create_audio_port, some_sound_data);;
 
-let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
-
-(* quick checks *)
-let test_node_1 = { nodeId = 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; };;
-let test_node_2 = { nodeId = 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; };;
-next_node_id [ test_node_1; test_node_2 ] ;;
-
-(* quick checks *)
-let test_g = create_graph;;
-let (snd1, test_g) = add_node test_g some_sound;;
-let (snd2, test_g) = add_node test_g some_sound;;
-let (p1, test_g) = add_node test_g some_passthrough;;
 
 
 (******************************
@@ -276,6 +287,7 @@ and interval = {
   processes: process list
 }
 and condition = {
+  parentSync: int;
   condExpr: expression;
   previousItv: int list;
   nextItv: int list;
@@ -316,6 +328,10 @@ let find_end_TC itv scenario =
   find_parent_TC (find_next_IC itv scenario) scenario
 ;;
 
+let following_intervals cond scenario = 
+  List.find_all (fun x -> (List.mem x.itvId cond.nextItv)) scenario.intervals
+;;
+
 let add_process interval proc =
   { interval with processes = proc::interval.processes }
 ;;
@@ -348,12 +364,18 @@ let is_interval_running scenario itv =
 let update_conds scenario tc iclist =
   let new_tc = { tc with conds = iclist } in
   replace_TC scenario new_tc
-;;
+;; 
+
+
+
+(*****************************
+ * temporal model algorithms *
+ *****************************)
 
 (* These functions tick the temporal graph. They produce a pair :
    (new object, function to call on the data graph)
 *)
-let rec tick_loop s d p o =
+let rec tick_loop s d p o e =
   (s, graph_ident);
 
   (* actions & triggerings might happen on start / stop *)
@@ -408,10 +430,12 @@ and stop_process p =
   in ({ p with impl = tuple_first res}, tuple_second res);
 
   (* ticking of processes: increase the time. *)
-and tick_process newdate newpos offset p =
+and tick_process newdate newpos offset p e =
   let tick_res = match p.impl with
-    | Scenario s -> let (p, f) = tick_scenario s newdate newpos offset in (Scenario p, f);
-    | Loop l -> let (p, f) = tick_loop l newdate newpos offset; in (Loop p, f);
+    | Scenario s -> let (p, f) = tick_scenario s newdate newpos offset e 
+                    in (Scenario p, f);
+    | Loop l -> let (p, f) = tick_loop l newdate newpos offset e
+                in (Loop p, f);
     | None -> (p.impl, graph_ident);
   in ({ p with
         curTime = p.curTime + newdate;
@@ -421,10 +445,10 @@ and tick_process newdate newpos offset p =
       }, tuple_second tick_res);
 
   (* ticking of intervals: aggregate all the ticks of the processes *)
-and tick_interval itv t offset =
+and tick_interval itv t offset e =
   let new_date = (itv.date + t) in
   let new_pos = (float_of_int new_date /. float_of_int itv.nominalDuration) in
-  let tp = tick_process new_date new_pos offset in
+  let tp = tick_process new_date new_pos offset e in
   let ticked_procs = (List.map tp itv.processes) in
   ({ itv with
      date = new_date;
@@ -462,17 +486,17 @@ and scenario_ic_dispose scenario ic =
 (* this functions ticks an interval in the context of a scenario.
    it returns ( (new_interval, list of functions to apply), overticks )
  *)
-and scenario_run_interval scenario overticks tick offset interval =
+and scenario_run_interval scenario overticks tick offset interval e =
   let end_TC = find_end_TC interval scenario in
 
   match interval.maxDuration with
     (* if there is no max, we can go to the whole length of the tick *)
-    | None -> (tick_interval interval tick offset, overticks)
+    | None -> (tick_interval interval tick offset e, overticks)
 
     (* if there is a max, we have to stop at the max and save the remainings *)
     | Some maxdur ->
       let actual_tick = min tick (maxdur - interval.date) in
-      let tick_res = tick_interval interval actual_tick offset in
+      let tick_res = tick_interval interval actual_tick offset e in
       let overtick = tick - (maxdur - interval.date) in
 
       (* find if there was already over-ticks recorded for this TC, and if so, update them *)
@@ -483,7 +507,7 @@ and scenario_run_interval scenario overticks tick offset interval =
             (tick_res, list_assoc_replace overticks end_TC.tcId new_overtick)
 
 (* this function does the evaluation & execution of a given temporal condition *)
-and scenario_process_TC scenario tc  =
+and scenario_process_TC scenario tc e =
 
   (**** utilities ****)
 
@@ -511,9 +535,9 @@ and scenario_process_TC scenario tc  =
 
   (* execution of a given instantaneous condition *)
   (* returns (ic, started intervals, stopped intervals *)
-  let execute_ic scenario ic =
+  let execute_ic scenario e ic =
     let ic = { ic with condExpr = update ic.condExpr } in
-    if evaluate ic.condExpr
+    if evaluate ic.condExpr e
     then
       scenario_ic_happen scenario ic
     else
@@ -525,7 +549,7 @@ and scenario_process_TC scenario tc  =
   let execute_tc scenario tc =
     (* execute the conditions *)
     let (new_conds, started_itv_ids, ended_itv_ids) =
-        lot_to_tol3 (List.map (execute_ic scenario) tc.conds) in
+        lot_to_tol3 (List.map (execute_ic scenario e) tc.conds) in
 
     (* start and stop the intervals *)
     let ended_intervals =
@@ -575,7 +599,7 @@ and scenario_process_TC scenario tc  =
     then
       let tc = { tc with syncExpr = update tc.syncExpr } in
 
-      if (not (evaluate tc.syncExpr))
+      if (not (evaluate tc.syncExpr e))
       then
         (* expression is false, do nothing apart updating the TC *)
         (replace_TC scenario tc, [ ], [ ])
@@ -586,7 +610,7 @@ and scenario_process_TC scenario tc  =
      (* max reached or true expression, we can execute the temporal condition  *)
      execute_tc scenario tc
 
-and tick_scenario scenario dur pos offset =
+and tick_scenario scenario dur pos offset (e:env) =
 
   (* execute the list of root TCs.
      l1 : list of executed ICs
@@ -597,7 +621,7 @@ and tick_scenario scenario dur pos offset =
     | h::t ->
         (* try to execute the TC *)
         let (scenario, conds, funs) =
-            scenario_process_TC scenario h in
+            scenario_process_TC scenario h e in
 
         if (List.length conds) == 0 then
           (* No new IC, the trigger wasn't executed, we keep it *)
@@ -618,12 +642,12 @@ and tick_scenario scenario dur pos offset =
     | h::t ->
         (* try to execute the TC *)
         let (scenario, conds, funs) =
-            scenario_process_TC scenario h in
+            scenario_process_TC scenario h e in
         process_tempConds scenario t ((conds @ l1), (funs @ l2))
   in
 
   (* execute a list of intervals *)
-  let rec process_intervals scenario itv_list overticks funs dur pos offset end_TCs =
+  let rec process_intervals scenario itv_list overticks funs dur offset end_TCs =
     match itv_list with
     | [ ] -> (scenario, overticks, end_TCs, funs)
     | interval::t ->
@@ -634,35 +658,51 @@ and tick_scenario scenario dur pos offset =
          (replace_interval scenario new_itv)
          t overticks 
          (funs@new_funs) 
-         dur pos offset 
+         dur offset 
          ((find_end_TC new_itv scenario)::end_TCs)
   in
-
-  (* execute the biggest part of the tick *)
-  let rt = get_temporalConds scenario.root_tempConds scenario in
-
-  let (scenario, conds, cond_funcs) = process_root_tempConds scenario rt ([], []) in
-
-  let running_itvs sc = List.filter (is_interval_running sc) sc.intervals in
   
-  let (scenario, overticks, end_TCs, itv_funcs) =
-    process_intervals scenario (running_itvs scenario) [] [] dur pos offset [] in
-
-  let (scenario, conds, cond_funcs) = process_tempConds scenario end_TCs ([], []) in
+  let rec finish_tick scenario overticks conds funcs dur offset end_TCs = 
+    match conds with 
+    | [ ] -> 
+      (* now we can process remaining end_tcs *)
+      (match end_TCs with 
+      | [ ] -> (scenario, funcs) 
+      | _ -> let (scenario, conds, cond_funcs) = 
+                process_tempConds scenario end_TCs ([], funcs) in
+             finish_tick scenario overticks conds cond_funcs dur offset [ ])
+      
     
-  (scenario, list_fun_combine (cond_funcs@itv_funcs))
+    | (cond:condition) :: remaining -> 
+      (* look if an over-tick was recorded for the TC *)
+      match (List.assoc_opt (find_parent_TC cond scenario).tcId overticks) with 
+      | None -> finish_tick scenario overticks remaining funcs dur offset end_TCs
+      | Some (min_t, max_t) -> 
+         (* we can go forward with executing some intervals *)
+         let (scenario, overticks, end_TCs, funcs) = 
+             process_intervals scenario (following_intervals cond scenario) overticks funcs (max_t) (offset + dur - max_t) end_TCs in
+         finish_tick scenario overticks remaining funcs dur offset end_TCs
+  in
+    
 
-  (* still have to do :
-    do
-      for all ICs that happened
-        if IC.node reached max
-          if overtick has a tick saved
-            run interval with remaining tick
-      clear pending ICs
-      for all end nodes
-        run nodes
-    while there are pending ICs
-  *)
+  (* first execute the root temporal conditions *)
+  let (scenario, conds, cond_funcs) = 
+    process_root_tempConds 
+        scenario 
+        (get_temporalConds scenario.root_tempConds scenario) 
+        ([], []) in
+
+  (* run the intervals that follows them *)
+  let (scenario, overticks, end_TCs, itv_funcs) =
+    process_intervals scenario (List.filter (is_interval_running scenario) scenario.intervals ) [] [] dur offset [] in
+
+  (* run potential terminating temporal conditions *)
+  let (scenario, conds, cond_funcs) = process_tempConds scenario end_TCs ([], []) in
+  
+  (* loop until the time cannot be advanced in any branch anymore *)
+  let (scenario, funcs) = finish_tick scenario overticks conds (cond_funcs@itv_funcs) dur offset end_TCs in
+  (scenario, list_fun_combine funcs)
+   
 ;;
 
 
@@ -690,11 +730,13 @@ let topo_sort graph =
 let can_execute nodes = true;;
 
 (* todo : remove the data stored in a port *)
-let clear_port p =
-  p;;
+let clear_value_port p = p;;
+let clear_audio_port p = p;;
 
 (* todo : copy data from the cables & environment to the port *)
-let init_port p graph =
+let init_value_port p graph =
+  p;;
+let init_audio_port p graph =
   p;;
 
 (* this sets-up  a node for before its execution *)
@@ -702,10 +744,10 @@ let init_node n g e =
   (* clear the outputs of the node *)
   (* and copy data from the environment or edges to the inputs *)
   let init_data = match n.data with
-    | Automation (ip, curve) -> Automation (init_port ip g, curve) ;
-    | Mapping (ip, op, curve) -> Mapping (init_port ip g, clear_port op, curve) ;
-    | Sound (ap, audio) -> Sound (init_port ap g, audio) ;
-    | Passthrough (ai, vi, ao, vo) -> Passthrough (init_port ai g, init_port vi g, clear_port ao, clear_port vo) ;
+    | Automation (op, curve) -> Automation (clear_value_port op, curve) ;
+    | Mapping (ip, op, curve) -> Mapping (init_value_port ip g, clear_value_port op, curve) ;
+    | Sound (ap, audio) -> Sound (init_audio_port ap g, audio) ;
+    | Passthrough (ai, vi, ao, vo) -> Passthrough (init_audio_port ai g, init_audio_port vi g, clear_audio_port ao, clear_audio_port vo) ;
   in { n with data = init_data; }
 ;;
 
@@ -722,9 +764,6 @@ let exec_node g n token =
   };;
 
 let remove_node l nodeId = List.filter (fun x -> x.nodeId != nodeId) l ;;
-
-let nodes = [ { nodeId= 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]}; { nodeId= 2; data = some_sound; executed = false; prev_date = 0; tokens = [ ] } ] in
-remove_node nodes 1;;
 
 (* clear the inputs of a node, and copy its outputs to the environment & delay lines *)
 let teardown_node n g e = (n, g, e);;
@@ -840,7 +879,7 @@ let update e = e;;
 let rec main_loop root graph duration granularity e =
   if duration > 0
   then
-    let (root, funs) = tick_interval root granularity 0 in
+    let (root, funs) = tick_interval root granularity 0 e in
     let (graph, e)   = tick_graph_topo (update_graph funs graph) e in
     main_loop root graph (duration - granularity) granularity (update (commit e))
   else
@@ -848,12 +887,68 @@ let rec main_loop root graph duration granularity e =
 ;;
 
 
-(* tests *)
+
+
+
+
+
+
+
+
+
+(*********
+ * tests *
+ *********)
+
+
+(* quick checks *)
+let test_atom = Atom ((AtomValue (Float 3.4)), (AtomValue (Float 4.5)), Greater);;
+let test_comp = Composition (test_atom, test_atom, Or);;
+
+
+(* test *)
+let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
+let some_sound_data = Array.make 2 (Array.make 8 0.);;
+let some_sound = Sound (create_audio_port, some_sound_data);;
+
+let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
+
+(* test *)
+let test_node_1 = { nodeId = 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
+let test_node_2 = { nodeId = 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
+next_node_id [ test_node_1; test_node_2 ] ;;
+
+(* quick checks *)
+let test_edge = { edgeId = 33; source = 4; sink = 5; edgeType = Glutton; };;
+let some_sound_data = Array.make 2 (Array.make 8 0.);;
+let some_sound = Sound (create_audio_port, some_sound_data);;
+
+let some_passthrough = Passthrough ( create_audio_port, create_value_port, create_audio_port, create_value_port );;
+
+(* quick checks *)
+let test_node_1 = { nodeId = 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; };;
+let test_node_2 = { nodeId = 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; };;
+next_node_id [ test_node_1; test_node_2 ] ;;
+
+(* quick checks *)
+let test_g = create_graph;;
+let (snd1, test_g) = add_node test_g some_sound;;
+let (snd2, test_g) = add_node test_g some_sound;;
+let (p1, test_g) = add_node test_g some_passthrough;;
+
+
+let nodes = [ { nodeId= 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]}; { nodeId= 2; data = some_sound; executed = false; prev_date = 0; tokens = [ ] } ] in
+remove_node nodes 1;;
+
+
 
 (*
 let nodes = [ { nodeId= 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]}; { nodeId= 2; data = some_sound; executed = false; prev_date = 0; tokens = [ ] } ] in
 remove_node nodes 1;;
 *)
+
+let test_p = ValueParam (Float 3.4) ;;
+let test_n = { name = "foo"; param = Some test_p; children = [] } ;;
 
 (* Complete example: 2-track sequencer *)
 (* 1. Create data graph *)
@@ -875,7 +970,7 @@ let test_itv_1 = {
   maxDuration = Some 5000;
   nominalDuration = 5000;
   date = 0; itvStatus = Waiting;
-  processes = [ (*
+  processes = [ 
     {
       procNode = snd_node_1.nodeId;
       procEnable = false;
@@ -883,7 +978,7 @@ let test_itv_1 = {
       curOffset = 0;
       curPos = 0.;
       impl = None;
-    } *)
+    } 
   ];
 } in
 
@@ -921,6 +1016,7 @@ let test_TC_1 = {
   tcId = 1;
   syncExpr = true_expression;
   conds = [ {
+      parentSync = 1;
       condExpr = true_expression;
       previousItv = [ ];
       nextItv = [ 1 ];
@@ -932,6 +1028,7 @@ let test_TC_2 = {
   tcId = 2;
   syncExpr = true_expression;
   conds = [ {
+      parentSync = 2;
       condExpr = true_expression;
       previousItv = [ 1 ];
       nextItv = [ 2 ];
@@ -943,6 +1040,7 @@ let test_TC_3 = {
   tcId = 3;
   syncExpr = true_expression;
   conds = [ {
+      parentSync = 3;
       condExpr = true_expression;
       previousItv = [ 2 ];
       nextItv = [ 3 ];
@@ -954,6 +1052,7 @@ let test_TC_4 = {
   tcId = 4;
   syncExpr = true_expression;
   conds = [ {
+      parentSync = 4;
       condExpr = true_expression;
       previousItv = [ 3 ];
       nextItv = [  ];
@@ -989,7 +1088,9 @@ let test_root = {
   ]
 } in
 let env = 0 in
-(* main_loop test_root test_g 20000 1000 env;; *)
+(* main_loop test_root test_g 20000 1000 env;; 
+ exit 0;;
+ *)
 (* tick_interval test_itv_1 100 0 in *)
 (*
 replace_intervals {
