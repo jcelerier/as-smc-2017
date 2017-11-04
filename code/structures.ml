@@ -1,6 +1,9 @@
 (***********
  * utility *
  ***********)
+
+exception NotFound;;
+
 let tuple_first (a, b) = a;;
 let tuple_second (a, b) = b;;
 
@@ -151,14 +154,19 @@ type edgeId = EdgeId of int;;
 type nodeId = NodeId of int;;
 type portId = PortId of int;;
 (* ports *)
-type edgeType = Glutton | Strict | Delayed ;;
+type edgeType =
+    Glutton
+  | Strict
+  | DelayedGlutton of value list
+  | DelayedStrict of value list
+;;
 type edge = {
     edgeId: edgeId;
-    source: nodeId;
-    sink: nodeId;
+    source: portId;
+    sink: portId;
     edgeType: edgeType;
-}
-and port = {
+};;
+type port = {
     portId: portId;
     portAddr: string option;
     portEdges: edgeId list;
@@ -192,10 +200,25 @@ let make_token dur pos off =
   };;
 
 (* nodes of the data graph *)
-type dataNode = Automation of automation | Mapping of mapping | Sound of sound | Passthrough of passthrough ;;
-type grNode = { nodeId: nodeId; data: dataNode; executed: bool; prev_date: duration; tokens: token_request list; };;
+type dataNode =
+    Automation of automation
+  | Mapping of mapping
+  | Sound of sound
+  | Passthrough of passthrough
+;;
+type grNode = {
+    nodeId: nodeId;
+    data: dataNode;
+    executed: bool;
+    prev_date: duration;
+    tokens: token_request list;
+};;
 
-type graph = { nodes: grNode list ; edges: edge list; };;
+type graph = {
+    nodes: grNode list;
+    edges: edge list;
+};;
+
 let create_graph = { nodes = []; edges = [] } ;;
 
 
@@ -253,6 +276,27 @@ let add_edge gr src snk t =
 (* find a node in a graph by id *)
 let find_node graph nodeId =
   List.find (fun n -> n.nodeId == nodeId) graph.nodes
+;;
+
+(* find a port in a graph by id *)
+let find_port graph portId =
+  let rec impl portId nodes =
+  match nodes with
+  | [ ] -> raise NotFound
+  | h :: t ->
+    match h.data with
+    | Automation (op, _) -> if op.portId == portId then op
+                            else raise NotFound;
+    | Mapping (ip, op, _) ->  if ip.portId == portId then ip
+                         else if op.portId == portId then op
+                         else raise NotFound;
+    | Sound (op, _) -> if op.portId == portId then op
+                       else raise NotFound;
+    | Passthrough (ip, op) -> if ip.portId == portId then ip
+                         else if op.portId == portId then op
+                         else raise NotFound;
+  in
+  impl portId graph.nodes
 ;;
 
 (* replace a node in a graph *)
@@ -752,8 +796,31 @@ let clear_port p = { p with portValue = None };;
 let get_edges edges gr =
   List.find_all (fun x -> List.mem x.edgeId edges) gr.edges;;
 
-let aggregate_data (v: value option) edge =
-  (* some combination function *) v ;;
+(* some combination function *)
+let combine (v1:value) (v2:value) =
+  match (v1, v2) with
+  | (Audio a1, Audio a2) -> Audio a1 (* mix audio *)
+  | (_,v) -> v;; (* take latest *)
+
+(* reads the data of the source when there is a cable between two ports *)
+let get_src_value edge gr =
+  let src_port = find_port gr edge.source in
+  match edge.edgeType with
+  | Strict -> src_port.portValue
+  | Glutton -> src_port.portValue
+  | DelayedStrict dl -> Some (Int 0)
+  | DelayedGlutton dl -> Some (Int 0)
+;;
+
+(* combine read data with existing data in a port *)
+let aggregate_data gr (v: value option) edge  =
+  match (v, get_src_value edge gr) with
+  | (None, None) -> None
+  | (None, v) -> v
+  | (v, None) -> v
+  | (Some v1, Some v2) -> Some (combine v1 v2)
+;;
+
 (* copy data from the cables & environment to the port *)
 let init_port (p:port) g (e:env) =
   match p.portEdges with
@@ -764,7 +831,7 @@ let init_port (p:port) g (e:env) =
          { p with portValue = pv }
 
   | _ -> { p with portValue = (
-                List.fold_left aggregate_data None (get_edges p.portEdges g) )
+                List.fold_left (aggregate_data g) None (get_edges p.portEdges g) )
          }
   ;;
 
@@ -939,7 +1006,7 @@ let test_comp = Or (test_atom, test_atom);;
 
 
 (* test *)
-let test_edge = { edgeId = EdgeId 33; source = NodeId 4; sink = NodeId 5; edgeType = Glutton; };;
+let test_edge = { edgeId = EdgeId 33; source = PortId 4; sink = PortId 5; edgeType = Glutton; };;
 let some_sound_data = Array.make 2 (Array.make 8 0.);;
 let some_sound = Sound (create_port, some_sound_data);;
 
@@ -951,7 +1018,7 @@ let test_node_2 = { nodeId = NodeId 34; data = some_sound; executed = false; pre
 next_node_id [ test_node_1; test_node_2 ] ;;
 
 (* quick checks *)
-let test_edge = { edgeId = EdgeId 33; source = NodeId 4; sink = NodeId 5; edgeType = Glutton; };;
+let test_edge = { edgeId = EdgeId 33; source = PortId 4; sink = PortId 5; edgeType = Glutton; };;
 let some_sound_data = Array.make 2 (Array.make 8 0.);;
 let some_sound = Sound (create_port, some_sound_data);;
 
