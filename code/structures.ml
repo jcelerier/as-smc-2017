@@ -3,6 +3,7 @@
  ***********)
 
 exception NotFound;;
+exception Todo;;
 
 let tuple_first (a, b) = a;;
 let tuple_second (a, b) = b;;
@@ -294,6 +295,9 @@ let add_edge gr src snk t =
 let find_node graph nodeId =
   List.find (fun n -> n.nodeId == nodeId) graph.nodes
 ;;
+let find_edge graph edgeId =
+  List.find (fun n -> n.edgeId == edgeId) graph.edges
+;;
 
 (* find a port in a graph by id *)
 let find_port graph portId =
@@ -312,6 +316,25 @@ let find_port graph portId =
     | Passthrough (ip, op) -> if ip.portId == portId then ip
                          else if op.portId == portId then op
                          else raise NotFound;
+  in
+  impl portId graph.nodes
+;;
+
+(* find the node of a port in a graph *)
+let find_port_node graph portId =
+  let rec impl portId nodes =
+  match nodes with
+  | [ ] -> raise NotFound
+  | h :: t ->
+    match h.data with
+    | Automation (op, _) -> if op.portId == portId then h
+                            else raise NotFound;
+    | Mapping (ip, op, _) -> if ip.portId == portId || op.portId == portId then h
+                             else raise NotFound;
+    | Sound (op, _) -> if op.portId == portId then h
+                       else raise NotFound;
+    | Passthrough (ip, op) -> if ip.portId == portId || op.portId == portId then h
+                              else raise NotFound;
   in
   impl portId graph.nodes
 ;;
@@ -885,16 +908,18 @@ let exec_node g n token =
 };;
 
 let in_port_disabled edge graph =
-  true;;
+  not (is_enabled (find_port_node graph (find_edge graph edge).sink));;
 
 let write_port_env p e =
   match p.portAddr with
   | Some addr -> (push addr p.portValue e)
   | None -> e
 ;;
-let write_port_edge p g =
+let write_port_edges p g =
   g
 ;;
+
+(* write the data in a port to the cables or environment if available *)
 let write_port p g e =
   let has_targets = (p.portEdges == []) in
   let all_targets_disabled =
@@ -903,9 +928,9 @@ let write_port p g e =
   if(not has_targets || all_targets_disabled) then
     (g, write_port_env p e)
   else
-    (write_port_edge p g , e)
+    (write_port_edges p g, e)
 ;;
-exception Todo;;
+
 (* clear the inputs of a node, and copy its outputs to the environment & delay lines *)
 let teardown_node n g e =
   let (g_res, data_res, e_res) =
@@ -947,7 +972,6 @@ let rec find_first sorted_nodes n1 n2 =
       -1
     else find_first t n1 n2;;
 
-(* TODO expliquer en quoi ce tri est pertinent - et pourquoi il est nécessaire *)
 let nodes_sort sorted_nodes n1 n2 =
   let p1 = has_port_input n1 in
   let p2 = has_port_input n2 in
@@ -1015,7 +1039,7 @@ let tick_graph_topo graph e =
   (clear_tokens graph, e);;
 
 
-(** likewise, this simulates the arrival of new data in the environment :
+(** this simulates the arrival of new data in the environment :
     audio inputs, etc. **)
 let update e = e;;
 
