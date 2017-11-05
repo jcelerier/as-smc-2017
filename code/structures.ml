@@ -541,13 +541,13 @@ and stop_process p =
   (* ticking of processes: increase the time. *)
 and tick_process newdate newpos offset (e:environment) p  =
   let tick_res = match p.impl with
-    | Scenario s -> let (p, f) = tick_scenario s newdate newpos offset e
+    | Scenario s -> let (p, f) = tick_scenario s p.curTime newdate newpos offset e
                     in (Scenario p, f);
     | Loop l -> let (p, f) = tick_loop l newdate newpos offset e
                 in (Loop p, f);
     | DefaultProcess -> (p.impl, add_tick_to_node p.procNode (make_token newdate newpos offset));
   in ({ p with
-        curTime = p.curTime + newdate;
+        curTime = newdate;
         curOffset = offset;
         curPos = newpos;
         impl = tuple_first tick_res
@@ -719,8 +719,8 @@ and scenario_process_TC scenario tc (e:environment) =
      (* max reached or true expression, we can execute the temporal condition  *)
      execute_tc scenario tc
 
-and tick_scenario scenario dur pos offset (e:environment) =
-
+and tick_scenario scenario olddate newdate pos offset (e:environment) =
+  let dur = newdate - olddate in
   (* execute the list of root TCs.
      l1 : list of executed ICs
      l2 : list of resulting functions  *)
@@ -1269,7 +1269,9 @@ let test_root = {
     }
   ]
 } in
-let _ = main_loop test_root test_g 20000 1000 empty_env
+ main_loop test_root test_g 7000 1000 empty_env;;
+
+ (*
 in
 (* tick_interval test_itv_1 100 0 in *)
 let _ =
@@ -1295,7 +1297,7 @@ tick_scenario {
   } 6000 0.1 0 empty_env
   in tick_scenario ts 1000 0.1 0 empty_env ;;
 exit 0;;
-
+*)
 
 (*
 type environment = {
