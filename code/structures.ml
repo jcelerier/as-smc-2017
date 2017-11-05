@@ -864,8 +864,9 @@ let get_src_value edge gr =
   match edge.edgeType with
   | Strict -> src_port.portValue
   | Glutton -> src_port.portValue
-  | DelayedStrict dl -> Some (Int 0)
-  | DelayedGlutton dl -> Some (Int 0)
+  (* these have their own buffer line where data is copied *)
+  | DelayedStrict dl -> raise Todo;
+  | DelayedGlutton dl -> raise Todo;
 ;;
 
 (* combine read data with existing data in a port *)
