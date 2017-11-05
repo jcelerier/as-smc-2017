@@ -73,63 +73,80 @@ type value =
 
 type node = { name: string; param: value option; children: node list; };;
 
+(***************
+ * environment *
+ ***************)
+exception UndefinedVariable;;
+let noenv = fun v -> raise UndefinedVariable;;
+let noenv_opt = fun v -> None;;
+
 type env = string -> value;;
-let pull var e = (e var);;
-let push var va e = fun v -> if v = var then va else (e var);;
 
+type environment = {
+  local: string -> value option;
+  global: string -> value
+};;
+let empty_env = {
+  local = noenv_opt;
+  global = noenv
+};;
 
-
+let pull var e =
+  match (e.local var) with
+  | None -> e.global var
+  | Some v -> v
+;;
+let push var va e =
+  { e with
+    local = fun v -> if v = var then va else (e.local var)
+};;
+(** in the C++ code this function applies
+    the data recorded in the local environment to the global environment,
+    write buffers to the sound card, etc etc *)
+let commit e = { e with local = noenv_opt };;
 
 (***************
  * expressions *
  ***************)
 
 
-exception UndefinedVariable
-let noenv = fun v -> raise UndefinedVariable
 
 type subexpr = Var of string | Value of value;;
 type expression =
-  | Greater of subexpr*subexpr
+  | Greater   of subexpr*subexpr
   | GreaterEq of subexpr*subexpr
-  | Lower of subexpr*subexpr
-  | LowerEq of subexpr*subexpr
-  | Equal of subexpr*subexpr
+  | Lower     of subexpr*subexpr
+  | LowerEq   of subexpr*subexpr
+  | Equal     of subexpr*subexpr
   | Different of subexpr*subexpr
-  | Negation of expression
-  | And of expression*expression
-  | Or of expression*expression
-  | Impulse of string*bool
+  | Negation  of expression
+  | And       of expression*expression
+  | Or        of expression*expression
+  | Impulse   of string*bool
 ;;
 
 exception EvalError;;
 
-let fbbb v1 v2 f =
-  match (v1, v2) with
-    | (Bool b1, Bool b2) -> f b1 b2
-    | _,_ -> raise EvalError
-
-let fiib v1 v2 f e =
-  match (v1,v2) with
-    | (Var n1, Var n2) -> fbbb (e n1) (e n2) f
-    | (Var n1, Value n2) -> fbbb (e n1) n2 f
-    | (Value n1, Var n2) -> fbbb n1 (e n2) f
-    | (Value n1, Value n2) -> fbbb n1 n2 f
-
-
-let fbb v1 f =
-  match v1 with
-    | Bool b1 -> Bool (f b1)
-    | _ -> raise EvalError
-
-let rec evaluate expr e =
+let rec evaluate expr (e:environment) =
+ let compare v1 v2 f =
+   match (v1, v2) with
+     | (Bool b1, Bool b2) -> f b1 b2
+     | _,_ -> raise EvalError
+ in
+ let eval_atom v1 v2 f e =
+   match (v1,v2) with
+     | (Var n1, Var n2)     -> compare (pull n1 e) (pull n2 e) f
+     | (Var n1, Value n2)   -> compare (pull n1 e) n2 f
+     | (Value n1, Var n2)   -> compare n1 (pull n2 e) f
+     | (Value n1, Value n2) -> compare n1 n2 f
+ in
  match expr with
-  | Greater (e1,e2)   -> fiib e1 e2 (>) e
-  | GreaterEq (e1,e2) -> fiib e1 e2 (>=) e
-  | Lower (e1,e2)     -> fiib e1 e2 (<) e
-  | LowerEq (e1,e2)   -> fiib e1 e2 (<=) e
-  | Equal (e1,e2)     -> fiib e1 e2 (=) e
-  | Different (e1,e2) -> fiib e1 e2 (!=) e
+  | Greater (e1,e2)   -> eval_atom e1 e2 (>) e
+  | GreaterEq (e1,e2) -> eval_atom e1 e2 (>=) e
+  | Lower (e1,e2)     -> eval_atom e1 e2 (<) e
+  | LowerEq (e1,e2)   -> eval_atom e1 e2 (<=) e
+  | Equal (e1,e2)     -> eval_atom e1 e2 (=) e
+  | Different (e1,e2) -> eval_atom e1 e2 (!=) e
   | Negation e1       -> not (evaluate e1 e)
   | And (e1,e2)       -> (evaluate e1 e) && (evaluate e2 e)
   | Or (e1,e2)        -> (evaluate e1 e) || (evaluate e2 e)
@@ -149,7 +166,6 @@ type status = Waiting | Pending | Happened | Disposed;;
 (**************
  * data model *
  **************)
-
 type edgeId = EdgeId of int;;
 type nodeId = NodeId of int;;
 type portId = PortId of int;;
@@ -173,8 +189,7 @@ type port = {
     portValue: value option
 };;
 
-type curve = (float * float) list ;;
-let value_at curve x = 0.0;;
+type curve = float -> float;;
 
 (* some specific nodes *)
 type automation = port * curve;;
@@ -204,8 +219,7 @@ type dataNode =
     Automation of automation
   | Mapping of mapping
   | Sound of sound
-  | Passthrough of passthrough
-;;
+  | Passthrough of passthrough;;
 type grNode = {
     nodeId: nodeId;
     data: dataNode;
@@ -219,12 +233,11 @@ type graph = {
     edges: edge list;
 };;
 
+(* utilities and tests *)
 let create_graph = { nodes = []; edges = [] } ;;
 
-
-(* utilities and tests *)
 let push_token token node =
-  { node with tokens = token::node.tokens }
+  { node with tokens = (node.tokens@[token]); }
 ;;
 
 let next_node_id lst = NodeId (next_id lst (fun n -> let (NodeId id) = n.nodeId in id));;
@@ -264,6 +277,10 @@ let add_node gr nodeDat =
   in
   let new_node = { nodeId = new_id; data = newNodeDat; executed = false; prev_date = 0; tokens = [ ]; } in
   (new_node, { gr with nodes = new_node::gr.nodes; })
+;;
+
+let remove_node l nodeId =
+  List.filter (fun x -> x.nodeId != nodeId) l
 ;;
 
 (* add an edge between two ports of the data graph *)
@@ -491,13 +508,13 @@ and stop_process p =
   in ({ p with impl = tuple_first res}, tuple_second res);
 
   (* ticking of processes: increase the time. *)
-and tick_process newdate newpos offset (e:env) p  =
+and tick_process newdate newpos offset (e:environment) p  =
   let tick_res = match p.impl with
     | Scenario s -> let (p, f) = tick_scenario s newdate newpos offset e
                     in (Scenario p, f);
     | Loop l -> let (p, f) = tick_loop l newdate newpos offset e
                 in (Loop p, f);
-    | DefaultProcess -> (p.impl, graph_ident);
+    | DefaultProcess -> (p.impl, add_tick_to_node p.procNode (make_token newdate newpos offset));
   in ({ p with
         curTime = p.curTime + newdate;
         curOffset = offset;
@@ -506,7 +523,7 @@ and tick_process newdate newpos offset (e:env) p  =
       }, tuple_second tick_res);
 
   (* ticking of intervals: aggregate all the ticks of the processes *)
-and tick_interval itv t offset (e:env) =
+and tick_interval itv t offset (e:environment) =
   let new_date = (itv.date + t) in
   let new_pos = (float_of_int new_date /. float_of_int itv.nominalDuration) in
   let tp = tick_process new_date new_pos offset e in
@@ -568,7 +585,7 @@ and scenario_run_interval scenario overticks tick offset interval e =
             (tick_res, list_assoc_replace overticks end_TC.tcId new_overtick)
 
 (* this function does the evaluation & execution of a given temporal condition *)
-and scenario_process_TC scenario tc e =
+and scenario_process_TC scenario tc (e:environment) =
 
   (**** utilities ****)
 
@@ -671,7 +688,7 @@ and scenario_process_TC scenario tc e =
      (* max reached or true expression, we can execute the temporal condition  *)
      execute_tc scenario tc
 
-and tick_scenario scenario dur pos offset (e:env) =
+and tick_scenario scenario dur pos offset (e:environment) =
 
   (* execute the list of root TCs.
      l1 : list of executed ICs
@@ -726,13 +743,14 @@ and tick_scenario scenario dur pos offset (e:env) =
   let rec finish_tick scenario overticks conds funcs dur offset end_TCs =
     match conds with
     | [ ] ->
-      (* now we can process remaining end_tcs *)
+      (* now we can process remaining end_TCs *)
       (match end_TCs with
-      | [ ] -> (scenario, funcs)
-      | _ -> let (scenario, conds, cond_funcs) =
+       (* nothing to execute anymore *)
+       | [ ] -> (scenario, funcs)
+       (* some TCs reached their end so we execute them *)
+       | _ -> let (scenario, conds, cond_funcs) =
                 process_tempConds scenario end_TCs ([], funcs) in
              finish_tick scenario overticks conds cond_funcs dur offset [ ])
-
 
     | (cond:condition) :: remaining ->
       (* look if an over-tick was recorded for the TC *)
@@ -741,29 +759,36 @@ and tick_scenario scenario dur pos offset (e:env) =
       | Some (min_t, max_t) ->
          (* we can go forward with executing some intervals *)
          let (scenario, overticks, end_TCs, funcs) =
-             process_intervals scenario (following_intervals cond scenario) overticks funcs (max_t) (offset + dur - max_t) end_TCs in
+             process_intervals
+                scenario
+                (following_intervals cond scenario)
+                overticks funcs
+                max_t
+                (offset + dur - max_t)
+                end_TCs
+         in
          finish_tick scenario overticks remaining funcs dur offset end_TCs
   in
 
+  (*** actual execution begins here ***)
 
-  (* first execute the root temporal conditions *)
-  let (scenario, conds, cond_funcs) =
+  (* first execute the root temporal conditions, if any *)
+  let (scenario, conds, funcs) =
     process_root_tempConds
         scenario
         (get_temporalConds scenario.root_tempConds scenario)
         ([], []) in
 
   (* run the intervals that follows them *)
-  let (scenario, overticks, end_TCs, itv_funcs) =
-    process_intervals scenario (List.filter (is_interval_running scenario) scenario.intervals ) [] [] dur offset [] in
+  let (scenario, overticks, end_TCs, funcs) =
+    process_intervals scenario (List.filter (is_interval_running scenario) scenario.intervals ) [] funcs dur offset [] in
 
   (* run potential terminating temporal conditions *)
-  let (scenario, conds, cond_funcs) = process_tempConds scenario end_TCs ([], []) in
+  let (scenario, conds, funcs) = process_tempConds scenario end_TCs ([], funcs) in
 
   (* loop until the time cannot be advanced in any branch anymore *)
-  let (scenario, funcs) = finish_tick scenario overticks conds (cond_funcs@itv_funcs) dur offset end_TCs in
+  let (scenario, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs in
   (scenario, list_fun_combine funcs)
-
 ;;
 
 
@@ -790,7 +815,7 @@ let topo_sort graph =
 (* todo : when a node can execute *)
 let can_execute nodes = true;;
 
-(* todo : remove the data stored in a port *)
+(* remove the data stored in a port *)
 let clear_port p = { p with portValue = None };;
 
 let get_edges edges gr =
@@ -822,47 +847,74 @@ let aggregate_data gr (v: value option) edge  =
 ;;
 
 (* copy data from the cables & environment to the port *)
-let init_port (p:port) g (e:env) =
+let init_port (p:port) g (e:environment) =
   match p.portEdges with
+  (* no edges: read from the env *)
   | [] -> let pv = match p.portAddr with
                 | None -> None
-                | Some str -> Some (e str)
+                | Some str -> Some (pull str e)
                 in
          { p with portValue = pv }
-
+  (* edges: read from them *)
   | _ -> { p with portValue = (
                 List.fold_left (aggregate_data g) None (get_edges p.portEdges g) )
          }
   ;;
 
-(* this sets-up  a node for before its execution *)
-let init_node n g e =
+(* this sets-up a node for before its execution *)
+let init_node n g (e:environment) =
   (* clear the outputs of the node *)
   (* and copy data from the environment or edges to the inputs *)
-  let init_data = match n.data with
-    | Automation (op, curve) -> Automation (clear_port op, curve) ;
-    | Mapping (ip, op, curve) -> Mapping (init_port ip g e, clear_port op, curve) ;
-    | Sound (op, audio) -> Sound (clear_port op, audio) ;
-    | Passthrough (ip, op) -> Passthrough (init_port ip g e, clear_port op) ;
-  in { n with data = init_data; }
-;;
+  { n with data =
+        match n.data with
+        | Automation (op, curve) -> Automation (clear_port op, curve) ;
+        | Mapping (ip, op, curve) -> Mapping (init_port ip g e, clear_port op, curve) ;
+        | Sound (op, audio) -> Sound (clear_port op, audio) ;
+        | Passthrough (ip, op) -> Passthrough (init_port ip g e, clear_port op);
+};;
 
 (* actual implementation of the execution algorithm for each kind of process... not really relevant *)
 let exec_node_impl data token =
   data
 ;;
-
 let exec_node g n token =
   { n with
     data = exec_node_impl n.data token;
     executed = true;
     prev_date = token.tokenDate;
-  };;
+};;
 
-let remove_node l nodeId = List.filter (fun x -> x.nodeId != nodeId) l ;;
+let in_port_disabled edge graph =
+  true;;
 
+let write_port_env p e =
+  match p.portAddr with
+  | Some addr -> (push addr p.portValue e)
+  | None -> e
+;;
+let write_port_edge p g =
+  g
+;;
+let write_port p g e =
+  let has_targets = (p.portEdges == []) in
+  let all_targets_disabled =
+    has_targets &&
+    List.for_all (fun x -> in_port_disabled x g) p.portEdges in
+  if(not has_targets || all_targets_disabled) then
+    (g, write_port_env p e)
+  else
+    (write_port_edge p g , e)
+;;
+exception Todo;;
 (* clear the inputs of a node, and copy its outputs to the environment & delay lines *)
-let teardown_node n g e = (n, g, e);;
+let teardown_node n g e =
+  let (g_res, data_res, e_res) =
+  match n.data with
+  | Automation (op, curve) -> let (g, e) = write_port op g e in (g, Automation (op, curve), e);
+  | Mapping (ip, op, curve) -> let (g, e) = write_port op g e in (g, Mapping (clear_port ip, op, curve), e);
+  | _ -> raise Todo;
+  in
+  ({ n with data = data_res}, g_res, e_res);;
 
 (* todo *)
 
@@ -925,7 +977,7 @@ let nodes_sort sorted_nodes n1 n2 =
     find_first sorted_nodes n1 n2
 ;;
 
-let rec sub_tick graph nodes e =
+let rec sub_tick graph nodes (e:environment) =
   match nodes with
   | [ ] -> (graph, e);
   | _ ->
@@ -963,17 +1015,13 @@ let tick_graph_topo graph e =
   (clear_tokens graph, e);;
 
 
-(** in the C++ code this function applies
-    the data recorded in the local environment to the global environment,
-    write buffers to the sound card, etc etc *)
-let commit e = e;;
 (** likewise, this simulates the arrival of new data in the environment :
     audio inputs, etc. **)
 let update e = e;;
 
 (** overall main loop: run a score for some amount of time,
     at a given granularity (eg tick every 50 units) **)
-let rec main_loop root graph duration granularity e =
+let rec main_loop root graph duration granularity (e:environment) =
   if duration > 0
   then
     let (root, funs) = tick_interval root granularity 0 e in
@@ -1211,8 +1259,8 @@ tick_scenario {
     intervals = [ test_itv_1; test_itv_2 ];
     tempConds = [ test_TC_1; test_TC_2; test_TC_3 ];
     root_tempConds = [ test_TC_1.tcId ];
-  } 6000 0.1 0 some_env
-  in tick_scenario ts 1000 0.1 0 some_env ;;
+  } 6000 0.1 0 empty_env
+  in tick_scenario ts 1000 0.1 0 empty_env ;;
 exit 0;;
 
 
