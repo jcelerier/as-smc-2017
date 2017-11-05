@@ -2,7 +2,7 @@
  * utility *
  ***********)
 
-exception NotFound;;
+exception NotFound of string;;
 exception Todo;;
 
 let tuple_first (a, b) = a;;
@@ -51,6 +51,7 @@ let next_id lst f =
 (**************
  * base types *
  **************)
+
 type duration = int;;
 type position = float;;
 
@@ -74,9 +75,11 @@ type value =
 
 type node = { name: string; param: value option; children: node list; };;
 
+
 (***************
  * environment *
  ***************)
+
 exception UndefinedVariable;;
 let noenv = fun v -> raise UndefinedVariable;;
 let noenv_opt = fun v -> None;;
@@ -106,11 +109,11 @@ let push var va e =
     write buffers to the sound card, etc etc *)
 let commit e = { e with local = noenv_opt };;
 
+
+
 (***************
  * expressions *
  ***************)
-
-
 
 type subexpr = Var of string | Value of value;;
 type expression =
@@ -147,7 +150,7 @@ let rec evaluate expr (e:environment) =
   | Lower (e1,e2)     -> eval_atom e1 e2 (<) e
   | LowerEq (e1,e2)   -> eval_atom e1 e2 (<=) e
   | Equal (e1,e2)     -> eval_atom e1 e2 (=) e
-  | Different (e1,e2) -> eval_atom e1 e2 (!=) e
+  | Different (e1,e2) -> eval_atom e1 e2 (<>) e
   | Negation e1       -> not (evaluate e1 e)
   | And (e1,e2)       -> (evaluate e1 e) && (evaluate e2 e)
   | Or (e1,e2)        -> (evaluate e1 e) || (evaluate e2 e)
@@ -281,7 +284,7 @@ let add_node gr nodeDat =
 ;;
 
 let remove_node l nodeId =
-  List.filter (fun x -> x.nodeId != nodeId) l
+  List.filter (fun x -> x.nodeId <> nodeId) l
 ;;
 
 (* add an edge between two ports of the data graph *)
@@ -293,29 +296,31 @@ let add_edge gr src snk t =
 
 (* find a node in a graph by id *)
 let find_node graph nodeId =
-  List.find (fun n -> n.nodeId == nodeId) graph.nodes
+  List.find (fun n -> n.nodeId = nodeId) graph.nodes
 ;;
 let find_edge graph edgeId =
-  List.find (fun n -> n.edgeId == edgeId) graph.edges
+  List.find (fun n -> n.edgeId = edgeId) graph.edges
 ;;
 
 (* find a port in a graph by id *)
+exception PortNotFound;;
+
 let find_port graph portId =
   let rec impl portId nodes =
   match nodes with
-  | [ ] -> raise NotFound
+  | [ ] -> raise PortNotFound
   | h :: t ->
     match h.data with
-    | Automation (op, _) -> if op.portId == portId then op
-                            else raise NotFound;
-    | Mapping (ip, op, _) ->  if ip.portId == portId then ip
-                         else if op.portId == portId then op
-                         else raise NotFound;
-    | Sound (op, _) -> if op.portId == portId then op
-                       else raise NotFound;
-    | Passthrough (ip, op) -> if ip.portId == portId then ip
-                         else if op.portId == portId then op
-                         else raise NotFound;
+    | Automation (op, _) -> if op.portId = portId then op
+                            else raise PortNotFound;
+    | Mapping (ip, op, _) ->  if ip.portId = portId then ip
+                         else if op.portId = portId then op
+                         else raise PortNotFound;
+    | Sound (op, _) -> if op.portId = portId then op
+                       else raise PortNotFound;
+    | Passthrough (ip, op) -> if ip.portId = portId then ip
+                         else if op.portId = portId then op
+                         else raise PortNotFound;
   in
   impl portId graph.nodes
 ;;
@@ -324,17 +329,17 @@ let find_port graph portId =
 let find_port_node graph portId =
   let rec impl portId nodes =
   match nodes with
-  | [ ] -> raise NotFound
+  | [ ] -> raise PortNotFound
   | h :: t ->
     match h.data with
-    | Automation (op, _) -> if op.portId == portId then h
-                            else raise NotFound;
-    | Mapping (ip, op, _) -> if ip.portId == portId || op.portId == portId then h
-                             else raise NotFound;
-    | Sound (op, _) -> if op.portId == portId then h
-                       else raise NotFound;
-    | Passthrough (ip, op) -> if ip.portId == portId || op.portId == portId then h
-                              else raise NotFound;
+    | Automation (op, _) -> if op.portId = portId then h
+                            else raise PortNotFound;
+    | Mapping (ip, op, _) -> if ip.portId = portId || op.portId = portId then h
+                             else raise PortNotFound;
+    | Sound (op, _) -> if op.portId = portId then h
+                       else raise PortNotFound;
+    | Passthrough (ip, op) -> if ip.portId = portId || op.portId = portId then h
+                              else raise PortNotFound;
   in
   impl portId graph.nodes
 ;;
@@ -342,7 +347,7 @@ let find_port_node graph portId =
 (* replace a node in a graph *)
 let replace_node graph nodeId newNode =
   { graph with
-    nodes = List.map (fun n -> if n.nodeId == nodeId then newNode else n) graph.nodes;
+    nodes = List.map (fun n -> if n.nodeId = nodeId then newNode else n) graph.nodes;
   };;
 
 let graph_ident g = g;;
@@ -413,12 +418,15 @@ and loop = {
 (* utility functions to work with scenario *)
 let find_prev_IC itv scenario =
   let conditions = List.concat (List.map (fun t -> t.conds) scenario.tempConds) in
-  List.find (fun ic -> (List.exists (fun id -> id == itv.itvId) ic.nextItv)) conditions
+  List.find (fun ic ->
+      (List.exists (fun id -> id = itv.itvId) ic.nextItv)
+    )
+    conditions
 ;;
 
 let find_next_IC itv scenario =
   let conditions = List.concat (List.map (fun t -> t.conds) scenario.tempConds) in
-  List.find (fun ic -> (List.exists (fun id -> id == itv.itvId) ic.previousItv)) conditions
+  List.find (fun ic -> (List.exists (fun id -> id = itv.itvId) ic.previousItv)) conditions
 ;;
 
 let find_parent_TC cond scenario =
@@ -439,13 +447,13 @@ let add_process interval proc =
 
 let replace_TC scenario tc =
   { scenario with
-    tempConds = List.map (fun x -> if x.tcId == tc.tcId then tc else x) scenario.tempConds;
+    tempConds = List.map (fun x -> if x.tcId = tc.tcId then tc else x) scenario.tempConds;
   }
 ;;
 
 let replace_interval scenario itv =
   { scenario with
-    intervals = List.map (fun x -> if x.itvId == itv.itvId then itv else x) scenario.intervals;
+    intervals = List.map (fun x -> if x.itvId = itv.itvId then itv else x) scenario.intervals;
   }
 ;;
 
@@ -459,8 +467,8 @@ let replace_intervals scenario itvs =
 ;;
 
 let is_interval_running scenario itv =
-  (find_prev_IC itv scenario).status == Happened &&
-  (find_next_IC itv scenario).status != Happened;;
+  (find_prev_IC itv scenario).status = Happened &&
+  (find_next_IC itv scenario).status <> Happened;;
 
 let update_conds scenario tc iclist =
   let new_tc = { tc with conds = iclist } in
@@ -486,9 +494,9 @@ let rec tick_loop s d p o e =
      they are not preceded by any interval and start on the condition "true" *)
 and start_scenario s =
   let is_root tc =
-    (tc.syncExpr == true_expression)
+    (tc.syncExpr = true_expression)
     &&
-    (List.for_all (fun c -> c.previousItv == [ ]) tc.conds)
+    (List.for_all (fun c -> c.previousItv = [ ]) tc.conds)
   in
   Scenario {
     s with
@@ -612,18 +620,18 @@ and scenario_process_TC scenario tc (e:environment) =
 
   (**** utilities ****)
 
-  (* minDurReached ic == true iff all the non-disposed previous intervals
+  (* minDurReached ic = true iff all the non-disposed previous intervals
      have reached their min duration *)
   let minDurReached ic =
     (* find the intervals in the evaluation area *)
     let min_reached itv =
       (itv.date >= itv.minDuration) ||
-      (find_prev_IC itv scenario).status == Disposed
+      (find_prev_IC itv scenario).status = Disposed
     in
     List.for_all min_reached (get_intervals ic.previousItv scenario)
   in
 
-  (* maxDurReached ic == true iff any of the previous intervals
+  (* maxDurReached ic = true iff any of the previous intervals
      have reached their max duration *)
   let maxDurReached ic =
     let max_reached itv =
@@ -684,7 +692,7 @@ and scenario_process_TC scenario tc (e:environment) =
   (* amongst all the pending ones, we check if any has reached its max *)
   let tcMaxDurReached =
     List.exists
-      (fun ic -> ic.status == Pending && maxDurReached ic)
+      (fun ic -> ic.status = Pending && maxDurReached ic)
       updConds
   in
 
@@ -692,11 +700,11 @@ and scenario_process_TC scenario tc (e:environment) =
   let scenario = (update_conds scenario tc updConds) in
 
   (* if not all ICs are pending or disposed *)
-  if (not (List.for_all (fun x -> x.status == Pending || x.status == Disposed) updConds))
+  if (not (List.for_all (fun x -> x.status = Pending || x.status = Disposed) updConds))
   then
     (scenario, [ ], [ ])
   else
-    if ((tc.syncExpr != true_expression) && (not tcMaxDurReached))
+    if ((tc.syncExpr <> true_expression) && (not tcMaxDurReached))
     then
       let tc = { tc with syncExpr = update tc.syncExpr } in
 
@@ -724,14 +732,14 @@ and tick_scenario scenario dur pos offset (e:environment) =
         let (scenario, conds, funs) =
             scenario_process_TC scenario h e in
 
-        if (List.length conds) == 0 then
+        if (List.length conds) = 0 then
           (* No new IC, the trigger wasn't executed, we keep it *)
           (* note: the user interface enforces that a TC always has at least a single IC *)
           process_root_tempConds scenario t ((conds @ l1), (funs @ l2))
         else
           (* the TC was executed, remove it from the roots *)
           process_root_tempConds
-            { scenario with root_tempConds = List.filter (fun x -> x != h.tcId) scenario.root_tempConds }
+            { scenario with root_tempConds = List.filter (fun x -> x <> h.tcId) scenario.root_tempConds }
             t
             ((conds @ l1), (funs @ l2))
   in
@@ -825,7 +833,7 @@ let update_graph fun_list graph =
   let apply_rev_fun g f = f g in
   List.fold_left apply_rev_fun graph fun_list ;;
 
-let is_enabled n = (List.length n.tokens) == 0;;
+let is_enabled n = (List.length n.tokens) = 0;;
 
 (* todo : disables all nodes which are in strict relationship with a disabled node. *)
 let disable_strict_nodes nodes =
@@ -916,12 +924,12 @@ let write_port_env p e =
   | None -> e
 ;;
 let write_port_edges p g =
-  g
+  g (*todo*)
 ;;
 
 (* write the data in a port to the cables or environment if available *)
 let write_port p g e =
-  let has_targets = (p.portEdges == []) in
+  let has_targets = (p.portEdges = []) in
   let all_targets_disabled =
     has_targets &&
     List.for_all (fun x -> in_port_disabled x g) p.portEdges in
@@ -936,8 +944,9 @@ let teardown_node n g e =
   let (g_res, data_res, e_res) =
   match n.data with
   | Automation (op, curve) -> let (g, e) = write_port op g e in (g, Automation (op, curve), e);
+  | Sound (op, snd) -> let (g, e) = write_port op g e in (g, Sound (op, snd), e);
   | Mapping (ip, op, curve) -> let (g, e) = write_port op g e in (g, Mapping (clear_port ip, op, curve), e);
-  | _ -> raise Todo;
+  | Passthrough (ip, op) -> let (g, e) = write_port op g e in (g, Passthrough (clear_port ip, op), e);
   in
   ({ n with data = data_res}, g_res, e_res);;
 
@@ -966,9 +975,9 @@ let clear_tokens graph =
 let rec find_first sorted_nodes n1 n2 =
   match sorted_nodes with
   | [ ] -> raise (Failure "can't happen");
-  | h :: t-> if h == n1 then
+  | h :: t-> if h = n1 then
       1
-    else if h == n2 then
+    else if h = n2 then
       -1
     else find_first t n1 n2;;
 
@@ -1114,8 +1123,6 @@ let nodes = [
 ] in
 remove_node nodes (NodeId 1);;
 
-
-
 (*
 let nodes = [ { nodeId= 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]}; { nodeId= 2; data = some_sound; executed = false; prev_date = 0; tokens = [ ] } ] in
 remove_node nodes 1;;
@@ -1134,6 +1141,8 @@ let (itv_node_2, test_g) = add_node test_g some_passthrough in
 let (itv_node_3, test_g) = add_node test_g some_passthrough in
 let (sc_node_1, test_g) = add_node test_g some_passthrough in
 let (itv_node_4, test_g) = add_node test_g some_passthrough in
+
+
 
 (* 2. Create temporal structures *)
 let test_itv_1 = {
@@ -1260,7 +1269,7 @@ let test_root = {
     }
   ]
 } in
-let _ = main_loop test_root test_g 20000 1000
+let _ = main_loop test_root test_g 20000 1000 empty_env
 in
 (* tick_interval test_itv_1 100 0 in *)
 let _ =
