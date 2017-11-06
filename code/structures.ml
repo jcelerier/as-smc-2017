@@ -378,8 +378,6 @@ and process = {
   procNode: nodeId;
   procEnable: bool;
   curTime: duration;
-  curOffset: duration;
-  curPos: position;
   impl: processImpl;
 }
 and interval = {
@@ -389,7 +387,7 @@ and interval = {
   maxDuration : duration option;
   nominalDuration : duration;
   date : duration;
-  itvStatus: status;
+  speed: float;
   processes: process list
 }
 and condition = {
@@ -514,8 +512,6 @@ No samples will be produced so the offset does not matter.
 and start_process p =
     ({ p with
       curTime = 0;
-      curOffset = 0;
-      curPos = 0.;
       impl = match p.impl with
              | Scenario s -> start_scenario s;
              | Loop l -> start_loop l;
@@ -548,15 +544,13 @@ and tick_process newdate newpos offset (e:environment) p  =
     | DefaultProcess -> (p.impl, add_tick_to_node p.procNode (make_token newdate newpos offset));
   in ({ p with
         curTime = newdate;
-        curOffset = offset;
-        curPos = newpos;
         impl = tuple_first tick_res
       }, tuple_second tick_res);
 
   (* ticking of intervals: aggregate all the ticks of the processes *)
 and tick_interval itv t offset (e:environment) =
-  let new_date = (itv.date + t) in
-  let new_pos = (float_of_int new_date /. float_of_int itv.nominalDuration) in
+  let new_date = (itv.date + (truncate (ceil (float t) *. itv.speed))) in
+  let new_pos = (float new_date /. float itv.nominalDuration) in
   let tp = tick_process new_date new_pos offset e in
   let ticked_procs = (List.map tp itv.processes) in
   ({ itv with
@@ -570,7 +564,6 @@ and start_interval itv =
   let ticked_procs = (List.map start_process itv.processes) in
   ({ itv with
      date = 0;
-     itvStatus = Waiting;
      processes = (List.map tuple_first ticked_procs)
    },
     ((List.map tuple_second ticked_procs) @ [ add_tick_to_node itv.itvNode (make_token 0 0. 0) ]) )
@@ -1152,14 +1145,13 @@ let test_itv_1 = {
   minDuration = 5000;
   maxDuration = Some 5000;
   nominalDuration = 5000;
-  date = 0; itvStatus = Waiting;
+  date = 0;
+  speed = 1.;
   processes = [
     {
       procNode = snd_node_1.nodeId;
       procEnable = false;
       curTime = 0;
-      curOffset = 0;
-      curPos = 0.;
       impl = DefaultProcess;
     }
   ];
@@ -1171,7 +1163,8 @@ let test_itv_2 = {
   minDuration = 3000;
   maxDuration = Some 3000;
   nominalDuration = 3000;
-  date = 0; itvStatus = Waiting;
+  date = 0;
+  speed = 1.;
   processes = [ ];
 } in
 
@@ -1181,14 +1174,13 @@ let test_itv_3 = {
   minDuration = 5000;
   maxDuration = Some 5000;
   nominalDuration = 5000;
-  date = 0; itvStatus = Waiting;
+  date = 0;
+  speed = 1.;
   processes = [
     {
       procNode = snd_node_2.nodeId;
       procEnable = false;
       curTime = 0;
-      curOffset = 0;
-      curPos = 0.;
       impl = DefaultProcess;
     }
   ];
@@ -1258,14 +1250,12 @@ let test_root = {
   maxDuration = None;
   nominalDuration = 10000;
   date = 0;
-  itvStatus = Waiting;
+  speed = 1.;
   processes = [
     {
       procNode = sc_node_1.nodeId;
       procEnable = false;
       curTime = 0;
-      curOffset = 0;
-      curPos = 0.;
       impl = test_scenario;
     }
   ]
@@ -1328,3 +1318,10 @@ test_g ;;
 
 
 (*** example queue de reverb ? ***)
+(* fonctionnement: estimateur de gain -> si RMS < -90dB on coupe le trigger.
+ ---------(- - - - - T
+        reverb
+  -------------------
+        RMS
+  -------------------
+*)
