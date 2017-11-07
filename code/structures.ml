@@ -51,7 +51,6 @@ let next_id lst f =
 (**************
  * base types *
  **************)
-
 type duration = int;;
 type position = float;;
 
@@ -1066,12 +1065,9 @@ let rec main_loop root graph duration granularity (e:environment) =
 
 
 
-
-
 (*********
  * tests *
  *********)
-
 let some_env = fun s -> (Bool (true));;
 
 
