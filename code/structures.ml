@@ -163,7 +163,9 @@ let rec evaluate expr (e:environment) =
   | Or (e1,e2)        -> (evaluate e1 e) || (evaluate e2 e)
   | Impulse (v,b)     -> b (* instead, check if the env contains the value ? *)
 
-
+(* env: need to know if a message was received on an address ? *)
+(* have a "listener" data structure: elements can insert listeners on the
+  "l-env", the l-env is updated at each tick with a value set to true if a value was received *)
 (* two useful expressions *)
 let true_expression = Equal (Value (Bool true), Value (Bool true));;
 let false_expression = Equal (Value (Bool true), Value (Bool false));;
