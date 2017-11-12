@@ -456,8 +456,13 @@ let find_prev_IC itv scenario =
     conditions
 ;;
 
-let set_date (itv:intervalId) date (dates:(intervalId * duration) list) =
-  list_assoc_replace dates itv date
+let get_date (itv:interval) (dates:(intervalId * duration) list) =
+  match List.assoc_opt itv.itvId dates with
+  | None -> 0
+  | Some t -> t
+;;
+let set_date (itv:interval) date (dates:(intervalId * duration) list) =
+  list_assoc_replace dates itv.itvId date
 ;;
 
 let set_ic_status (ic:instCondId) status (statuses:(instCondId * status) list) =
@@ -479,6 +484,15 @@ let find_end_TC itv scenario =
 
 let following_intervals cond scenario =
   List.find_all (fun x -> (List.mem x.itvId cond.nextItv)) scenario.intervals
+;;
+
+let get_all_ICs scenario =
+  let rec impl tc_list cur_ics =
+    match tc_list with
+    | [] -> cur_ics
+    | tc::t -> impl t (tc.conds@cur_ics)
+  in
+  impl scenario.tempConds []
 ;;
 
 let add_process interval proc =
@@ -551,7 +565,9 @@ and start_scenario (s:scenario) (p:processId) (state:score_state) =
                  p
                  (List.map (fun x -> x.tcId) (List.filter is_root s.tempConds));
      (* set the date of every interval to 0 *)
-     itv_dates = list_assoc_merge state.itv_dates (List.map (fun x -> (x.itvId, 0)) s.intervals)
+     itv_dates = list_assoc_merge state.itv_dates (List.map (fun x -> (x.itvId, 0)) s.intervals);
+     (* set all ICs as waiting *)
+     ic_statuses = list_assoc_merge state.ic_statuses (List.map (fun x -> (x.icId, Waiting)) (get_all_ICs s))
    }
 
 and start_loop l state =
@@ -592,7 +608,7 @@ and tick_process cur_date new_date new_pos offset (state:score_state) p  =
 
   (* ticking of intervals: aggregate all the ticks of the processes *)
 and tick_interval (itv:interval) t offset (state:score_state) =
-  let (cur_date:duration) = (List.assoc itv.itvId state.itv_dates) in
+  let (cur_date:duration) = (get_date itv state.itv_dates) in
   let new_date = (cur_date + (truncate (ceil (float t) *. itv.speed))) in
   let new_pos = (float new_date /. float itv.nominalDuration) in
   let tp = tick_process cur_date new_date new_pos offset in
@@ -608,7 +624,7 @@ and tick_interval (itv:interval) t offset (state:score_state) =
 
   (* execute the interval itself *)
   (
-   { state with itv_dates = (list_assoc_replace state.itv_dates itv.itvId new_date ) },
+   { state with itv_dates = (set_date itv new_date state.itv_dates) },
    (funs @ [ add_tick_to_node itv.itvNode (make_token new_date new_pos offset) ])
   )
 
@@ -1127,14 +1143,18 @@ let update e = e;;
 
 (** overall main loop: run a score for some amount of time,
     at a given granularity (eg tick every 50 units) **)
-let rec main_loop root graph duration granularity (state:score_state) glob_env =
-  if duration > 0
-  then
-    let (state, funs) = tick_interval root granularity 0 state in
-    let (graph, e)   = tick_graph_topo (update_graph funs graph) state.scoreEnv in
-    main_loop root graph (duration - granularity) granularity { state with scoreEnv = (update (commit e)) }  glob_env
-  else
-    (root, graph, state)
+let main_loop root graph duration granularity (state:score_state) glob_env =
+    let rec main_loop_rec root graph duration granularity (state:score_state) funs glob_env  =
+      if duration > 0
+      then
+        let (state, new_funs) = tick_interval root granularity 0 state in
+        let (graph, e)    = tick_graph_topo (update_graph (funs@new_funs) graph) state.scoreEnv in
+        main_loop_rec root graph (duration - granularity) granularity { state with scoreEnv = (update (commit e)) } [] glob_env
+      else
+        (root, graph, state)
+    in
+    let (state, funs) = start_interval root state in
+    main_loop_rec root graph duration granularity state funs glob_env
 ;;
 
 
@@ -1331,7 +1351,8 @@ let test_root = {
 } in
 let empty_state = { scoreEnv = empty_env; ic_statuses = []; itv_dates = []; listeners = []; rootTCs = [] }in
 let glob_env = 0 in
- main_loop test_root test_g 7000 1000 empty_state glob_env;;
+let (a,b,c) = main_loop test_root test_g 7000 1000 empty_state glob_env in
+c;;
 
  (*
 in
