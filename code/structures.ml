@@ -509,9 +509,10 @@ let replace_intervals scenario itvs =
 ;;
 *)
 
-let is_interval_running scenario itv ic_status =
-  (ic_status (find_prev_IC itv scenario)) = Happened &&
-  (ic_status (find_next_IC itv scenario)) <> Happened;;
+let is_interval_running scenario ic_status itv =
+  (List.assoc (find_prev_IC itv scenario).icId ic_status) = Happened &&
+  (List.assoc (find_next_IC itv scenario).icId ic_status) <> Happened &&
+  (List.assoc (find_next_IC itv scenario).icId ic_status) <> Disposed;;
 
 (*
 let update_conds scenario tc iclist =
@@ -881,14 +882,15 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
         state [] in
 
   (* run the intervals that follows them *)
-  let (scenario, overticks, end_TCs, funcs) =
-    process_intervals scenario (List.filter (is_interval_running scenario) scenario.intervals ) [] funcs dur offset [] in
+  let running_intervals = (List.filter (is_interval_running scenario state.ic_statuses) scenario.intervals) in
+  let (state, overticks, end_TCs, funcs) =
+    process_intervals scenario running_intervals [] funcs dur offset [] state in
 
   (* run potential terminating temporal conditions *)
-  let (scenario, conds, funcs) = process_tempConds scenario end_TCs ([], funcs) in
+  let (state, funcs, conds) = process_tempConds scenario end_TCs state funcs [] in
 
   (* loop until the time cannot be advanced in any branch anymore *)
-  let (scenario, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs in
+  let (scenario, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs state in
   (list_fun_combine funcs, state)
 ;;
 
@@ -1125,14 +1127,14 @@ let update e = e;;
 
 (** overall main loop: run a score for some amount of time,
     at a given granularity (eg tick every 50 units) **)
-let rec main_loop root graph duration granularity (e:environment) glob_env =
+let rec main_loop root graph duration granularity (state:score_state) glob_env =
   if duration > 0
   then
-    let (root, funs) = tick_interval root granularity 0 e in
-    let (graph, e)   = tick_graph_topo (update_graph funs graph) e in
-    main_loop root graph (duration - granularity) granularity (update (commit e)) glob_env
+    let (state, funs) = tick_interval root granularity 0 state in
+    let (graph, e)   = tick_graph_topo (update_graph funs graph) state.scoreEnv in
+    main_loop root graph (duration - granularity) granularity { state with scoreEnv = (update (commit e)) }  glob_env
   else
-    (root, graph, e)
+    (root, graph, state)
 ;;
 
 
@@ -1219,10 +1221,10 @@ let test_itv_1 = {
   minDuration = 5000;
   maxDuration = Some 5000;
   nominalDuration = 5000;
-  date = 0;
   speed = 1.;
   processes = [
     {
+      procId = ProcessId 1;
       procNode = snd_node_1.nodeId;
       impl = DefaultProcess;
     }
@@ -1235,7 +1237,6 @@ let test_itv_2 = {
   minDuration = 3000;
   maxDuration = Some 3000;
   nominalDuration = 3000;
-  date = 0;
   speed = 1.;
   processes = [ ];
 } in
@@ -1246,10 +1247,10 @@ let test_itv_3 = {
   minDuration = 5000;
   maxDuration = Some 5000;
   nominalDuration = 5000;
-  date = 0;
   speed = 1.;
   processes = [
     {
+      procId = ProcessId 2;
       procNode = snd_node_2.nodeId;
       impl = DefaultProcess;
     }
@@ -1266,7 +1267,6 @@ let test_TC_1 = {
       condExpr = true_expression;
       previousItv = [ ];
       nextItv = [ IntervalId 1 ];
-      status = Waiting;
     } ];
 } in
 
@@ -1279,7 +1279,6 @@ let test_TC_2 = {
       condExpr = true_expression;
       previousItv = [ IntervalId 1 ];
       nextItv = [ IntervalId 2 ];
-      status = Waiting;
     } ];
 } in
 
@@ -1292,7 +1291,6 @@ let test_TC_3 = {
       condExpr = true_expression;
       previousItv = [ IntervalId 2 ];
       nextItv = [ IntervalId 3 ];
-      status = Waiting;
     } ];
 } in
 
@@ -1305,7 +1303,6 @@ let test_TC_4 = {
       condExpr = true_expression;
       previousItv = [ IntervalId 3 ];
       nextItv = [  ];
-      status = Waiting;
     } ];
 } in
 
@@ -1323,16 +1320,18 @@ let test_root = {
   minDuration = 0;
   maxDuration = None;
   nominalDuration = 10000;
-  date = 0;
   speed = 1.;
   processes = [
     {
+      procId = ProcessId 3;
       procNode = sc_node_1.nodeId;
       impl = test_scenario;
     }
   ]
 } in
- main_loop test_root test_g 7000 1000 empty_env;;
+let empty_state = { scoreEnv = empty_env; ic_statuses = []; itv_dates = []; listeners = []; rootTCs = [] }in
+let glob_env = 0 in
+ main_loop test_root test_g 7000 1000 empty_state glob_env;;
 
  (*
 in
