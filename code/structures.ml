@@ -175,7 +175,7 @@ let rec evaluate expr (e:environment) (listeners:expr_listener list) =
   | Negation e1       -> not (evaluate e1 e listeners)
   | And (e1,e2)       -> (evaluate e1 e listeners) && (evaluate e2 e listeners)
   | Or (e1,e2)        -> (evaluate e1 e listeners) || (evaluate e2 e listeners)
-  | Impulse (id,str)  -> (List.find (fun el -> el.exprId == id) listeners).exprSet
+  | Impulse (id,str)  -> (List.find (fun el -> el.exprId = id) listeners).exprSet
 
 (* env: need to know if a message was received on an address ? *)
 (* have a "listener" data structure: elements can insert listeners on the
@@ -407,6 +407,31 @@ type score_state =
  scoreEnv: environment
 };;
 
+let print_dates itv_dates =
+  let rec impl list =
+    match list with
+     | [] -> ()
+     | (IntervalId id, date)::t -> Printf.printf "(Interval %i, %i); " id date ; impl t;
+  in
+    Printf.printf "[" ;
+    impl itv_dates ;
+    Printf.printf "]\n" ;;
+
+let print_roots tcs =
+  let rec impl list =
+    match list with
+     | [] -> ()
+     | (_, lst)::t -> match lst with
+                       | [] -> impl t ;
+                       | (TempCondId id)::tc_t -> Printf.printf "Root TC %i; " id ; impl t;
+  in
+    Printf.printf "[" ;
+    impl tcs ;
+    Printf.printf "]\n" ;;
+let print_state (state:score_state) =
+  print_dates state.itv_dates;
+  print_roots state.rootTCs;
+  ;;
 type processImpl =
     Scenario of scenario | Loop of loop | DefaultProcess
 and process = {
@@ -436,7 +461,6 @@ and temporalCondition = {
   conds: condition list
 }
 and scenario = {
-  root_tempConds: tempCondId list;
   intervals: interval list ;
   tempConds: temporalCondition list;
   (* tick: duration -> position -> scenario; *)
@@ -464,6 +488,16 @@ let get_date (itv:interval) (dates:(intervalId * duration) list) =
 let set_date (itv:interval) date (dates:(intervalId * duration) list) =
   list_assoc_replace dates itv.itvId date
 ;;
+
+set_date {
+  itvId = IntervalId 0;
+  itvNode = NodeId 0;
+  minDuration = 3000;
+  maxDuration = Some 3000;
+  nominalDuration = 3000;
+  speed = 1.;
+  processes = [ ];
+} 7000 [ (IntervalId 1, 1000) ] ;;
 
 let set_ic_status (ic:instCondId) status (statuses:(instCondId * status) list) =
   list_assoc_replace statuses ic status
@@ -517,6 +551,9 @@ let get_intervals id_list scenario =
 let get_temporalConds id_list scenario =
   List.filter (fun x -> List.mem x.tcId id_list) scenario.tempConds;;
 
+let get_rootTempConds pid scenario state =
+  let ids = List.assoc pid state.rootTCs in
+  get_temporalConds ids scenario;;
 (*
 let replace_intervals scenario itvs =
   List.fold_left replace_interval scenario itvs
@@ -608,6 +645,7 @@ and tick_process cur_date new_date new_pos offset (state:score_state) p  =
 
   (* ticking of intervals: aggregate all the ticks of the processes *)
 and tick_interval (itv:interval) t offset (state:score_state) =
+  Printf.printf "tick_interval before: "; print_state state;
   let (cur_date:duration) = (get_date itv state.itv_dates) in
   let new_date = (cur_date + (truncate (ceil (float t) *. itv.speed))) in
   let new_pos = (float new_date /. float itv.nominalDuration) in
@@ -615,12 +653,16 @@ and tick_interval (itv:interval) t offset (state:score_state) =
   let rec exec_processes procs funs state =
     match procs with
     | [] -> (funs, state)
-    | proc::t -> let (nf, state) = tp state proc in
-                 exec_processes t (funs@[nf]) state
+    | proc::t -> let (nf, ns) = tp state proc in
+                 exec_processes t (funs@[nf]) ns
   in
 
   (* execute all the processes *)
   let (funs, state) = exec_processes itv.processes [] state in
+
+   Printf.printf "tick_interval after: ";
+   print_dates state.itv_dates; print_dates (set_date itv new_date state.itv_dates);
+ (*  print_state { state with itv_dates = (set_date itv new_date state.itv_dates) }; *)
 
   (* execute the interval itself *)
   (
@@ -630,6 +672,7 @@ and tick_interval (itv:interval) t offset (state:score_state) =
 
 
 and start_interval itv (state:score_state) =
+  Printf.printf "Start interval\n";
   let rec start_processes procs funs (state:score_state) =
     match procs with
     | [] -> (funs, (state:score_state))
@@ -665,6 +708,7 @@ and scenario_ic_dispose scenario ic =
 and scenario_run_interval scenario overticks tick offset interval (state:score_state) =
   let end_TC = find_end_TC interval scenario in
   let interval_date = (List.assoc interval.itvId state.itv_dates) in
+  let () = Printf.printf "running interval at dur %i ; cur = %i\n" tick interval_date in
 
   match interval.maxDuration with
     (* if there is no max, we can go to the whole length of the tick *)
@@ -684,8 +728,8 @@ and scenario_run_interval scenario overticks tick offset interval (state:score_s
             (tick_res, list_assoc_replace overticks end_TC.tcId new_overtick)
 
 (* this function does the evaluation & execution of a given temporal condition *)
-and scenario_process_TC scenario tc (state:score_state)=
-
+and scenario_process_TC scenario tc (state:score_state) =
+  let () = Printf.printf "starting to process TC %i \n" (let (TempCondId id) = tc.tcId in id) in
   (**** utilities ****)
 
   (* minDurReached ic = true iff all the non-disposed previous intervals
@@ -737,6 +781,7 @@ and scenario_process_TC scenario tc (state:score_state)=
                     (if newStatus = Happened then cond::happened_ics else happened_ics)
     in
     let (state, started_itv_ids, ended_itv_ids, happened_ics) = execute_all_ics tc.conds state [] [] [] in
+    Printf.printf "after execute_all_ics: "; print_state state;
 
     (* start and stop the intervals *)
     let rec start_all_intervals itvs (state:score_state) funs =
@@ -891,20 +936,24 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
   (*** actual execution begins here ***)
 
   (* first execute the root temporal conditions, if any *)
+  Printf.printf "Process roots %i\n" (List.length (get_rootTempConds pid scenario state));
   let (state, funcs) =
     process_root_tempConds
         scenario
-        (get_temporalConds scenario.root_tempConds scenario)
+        (get_rootTempConds pid scenario state)
         state [] in
 
+  Printf.printf "Run intervals \n";
   (* run the intervals that follows them *)
   let running_intervals = (List.filter (is_interval_running scenario state.ic_statuses) scenario.intervals) in
   let (state, overticks, end_TCs, funcs) =
     process_intervals scenario running_intervals [] funcs dur offset [] state in
 
+  Printf.printf "Process tempConds \n";
   (* run potential terminating temporal conditions *)
   let (state, funcs, conds) = process_tempConds scenario end_TCs state funcs [] in
 
+  Printf.printf "Finish tick \n";
   (* loop until the time cannot be advanced in any branch anymore *)
   let (scenario, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs state in
   (list_fun_combine funcs, state)
@@ -1147,9 +1196,13 @@ let main_loop root graph duration granularity (state:score_state) glob_env =
     let rec main_loop_rec root graph duration granularity (state:score_state) funs glob_env  =
       if duration > 0
       then
+        (
+        Printf.printf "\nmain_loop before: "; print_state state;
         let (state, new_funs) = tick_interval root granularity 0 state in
+        Printf.printf "main_loop after: "; print_state state;
         let (graph, e)    = tick_graph_topo (update_graph (funs@new_funs) graph) state.scoreEnv in
         main_loop_rec root graph (duration - granularity) granularity { state with scoreEnv = (update (commit e)) } [] glob_env
+        )
       else
         (root, graph, state)
     in
@@ -1238,9 +1291,9 @@ let (itv_node_4, test_g) = add_node test_g some_passthrough in
 let test_itv_1 = {
   itvId = IntervalId 1;
   itvNode = itv_node_1.nodeId;
-  minDuration = 5000;
-  maxDuration = Some 5000;
-  nominalDuration = 5000;
+  minDuration = 4500;
+  maxDuration = Some 4500;
+  nominalDuration = 4500;
   speed = 1.;
   processes = [
     {
@@ -1330,7 +1383,6 @@ let test_TC_4 = {
 let test_scenario = Scenario {
     intervals = [ test_itv_1; test_itv_2; test_itv_3 ];
     tempConds = [ test_TC_1; test_TC_2; test_TC_3; test_TC_4 ];
-    root_tempConds = [ test_TC_1.tcId ];
   }
 in
 
