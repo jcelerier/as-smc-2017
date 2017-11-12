@@ -114,9 +114,13 @@ let pull var e =
   | None -> e.global var
   | Some v -> v
 ;;
-let push var va e =
+let push_local var va e =
   { e with
     local = fun v -> if v = var then va else (e.local var)
+};;
+let push_global var va e =
+  { e with
+    global = fun v -> if v = var then va else (e.global var)
 };;
 (** in the C++ code this function applies
     the data recorded in the local environment to the global environment,
@@ -384,7 +388,7 @@ let add_tick_to_node nodeId token graph =
     node with
     tokens = node.tokens @ [ token ];
   } in
-  replace_node graph nodeId new_node;;
+  replace_node graph nodeId new_node
 ;;
 
 
@@ -450,7 +454,6 @@ and interval = {
 }
 and condition = {
   icId: instCondId;
-  parentSync: tempCondId;
   condExpr: expression;
   previousItv: intervalId list;
   nextItv: intervalId list;
@@ -532,19 +535,6 @@ let get_all_ICs scenario =
 let add_process interval proc =
   { interval with processes = proc::interval.processes }
 ;;
-(*
-let replace_TC scenario tc =
-  { scenario with
-    tempConds = List.map (fun x -> if x.tcId = tc.tcId then tc else x) scenario.tempConds;
-  }
-;;
-
-let replace_interval scenario itv =
-  { scenario with
-    intervals = List.map (fun x -> if x.itvId = itv.itvId then itv else x) scenario.intervals;
-  }
-;;
-*)
 
 let get_intervals id_list scenario =
   List.filter (fun x -> List.mem x.itvId id_list) scenario.intervals;;
@@ -554,25 +544,11 @@ let get_temporalConds id_list scenario =
 let get_rootTempConds pid scenario state =
   let ids = List.assoc pid state.rootTCs in
   get_temporalConds ids scenario;;
-(*
-let replace_intervals scenario itvs =
-  List.fold_left replace_interval scenario itvs
-;;
-*)
 
 let is_interval_running scenario ic_status itv =
   (List.assoc (find_prev_IC itv scenario).icId ic_status) = Happened &&
   (List.assoc (find_next_IC itv scenario).icId ic_status) <> Happened &&
   (List.assoc (find_next_IC itv scenario).icId ic_status) <> Disposed;;
-
-(*
-let update_conds scenario tc iclist =
-  let new_tc = { tc with conds = iclist } in
-  replace_TC scenario new_tc
-;;
-*)
-
-
 
 (*****************************
  * temporal model algorithms *
@@ -645,7 +621,6 @@ and tick_process cur_date new_date new_pos offset (state:score_state) p  =
 
   (* ticking of intervals: aggregate all the ticks of the processes *)
 and tick_interval (itv:interval) t offset (state:score_state) =
-  Printf.printf "tick_interval before: "; print_state state;
   let (cur_date:duration) = (get_date itv state.itv_dates) in
   let new_date = (cur_date + (truncate (ceil (float t) *. itv.speed))) in
   let new_pos = (float new_date /. float itv.nominalDuration) in
@@ -660,10 +635,6 @@ and tick_interval (itv:interval) t offset (state:score_state) =
   (* execute all the processes *)
   let (funs, state) = exec_processes itv.processes [] state in
 
-   Printf.printf "tick_interval after: ";
-   print_dates state.itv_dates; print_dates (set_date itv new_date state.itv_dates);
- (*  print_state { state with itv_dates = (set_date itv new_date state.itv_dates) }; *)
-
   (* execute the interval itself *)
   (
    { state with itv_dates = (set_date itv new_date state.itv_dates) },
@@ -672,7 +643,6 @@ and tick_interval (itv:interval) t offset (state:score_state) =
 
 
 and start_interval itv (state:score_state) =
-  Printf.printf "Start interval\n";
   let rec start_processes procs funs (state:score_state) =
     match procs with
     | [] -> (funs, (state:score_state))
@@ -708,7 +678,6 @@ and scenario_ic_dispose scenario ic =
 and scenario_run_interval scenario overticks tick offset interval (state:score_state) =
   let end_TC = find_end_TC interval scenario in
   let interval_date = (List.assoc interval.itvId state.itv_dates) in
-  let () = Printf.printf "running interval at dur %i ; cur = %i\n" tick interval_date in
 
   match interval.maxDuration with
     (* if there is no max, we can go to the whole length of the tick *)
@@ -729,7 +698,6 @@ and scenario_run_interval scenario overticks tick offset interval (state:score_s
 
 (* this function does the evaluation & execution of a given temporal condition *)
 and scenario_process_TC scenario tc (state:score_state) =
-  let () = Printf.printf "starting to process TC %i \n" (let (TempCondId id) = tc.tcId in id) in
   (**** utilities ****)
 
   (* minDurReached ic = true iff all the non-disposed previous intervals
@@ -781,7 +749,6 @@ and scenario_process_TC scenario tc (state:score_state) =
                     (if newStatus = Happened then cond::happened_ics else happened_ics)
     in
     let (state, started_itv_ids, ended_itv_ids, happened_ics) = execute_all_ics tc.conds state [] [] [] in
-    Printf.printf "after execute_all_ics: "; print_state state;
 
     (* start and stop the intervals *)
     let rec start_all_intervals itvs (state:score_state) funs =
@@ -936,26 +903,22 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
   (*** actual execution begins here ***)
 
   (* first execute the root temporal conditions, if any *)
-  Printf.printf "Process roots %i\n" (List.length (get_rootTempConds pid scenario state));
   let (state, funcs) =
     process_root_tempConds
         scenario
         (get_rootTempConds pid scenario state)
         state [] in
 
-  Printf.printf "Run intervals \n";
   (* run the intervals that follows them *)
   let running_intervals = (List.filter (is_interval_running scenario state.ic_statuses) scenario.intervals) in
   let (state, overticks, end_TCs, funcs) =
     process_intervals scenario running_intervals [] funcs dur offset [] state in
 
-  Printf.printf "Process tempConds \n";
   (* run potential terminating temporal conditions *)
   let (state, funcs, conds) = process_tempConds scenario end_TCs state funcs [] in
 
-  Printf.printf "Finish tick \n";
   (* loop until the time cannot be advanced in any branch anymore *)
-  let (scenario, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs state in
+  let (state, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs state in
   (list_fun_combine funcs, state)
 ;;
 
@@ -1058,7 +1021,7 @@ let in_port_disabled edge graph =
 
 let write_port_env p e =
   match p.portAddr with
-  | Some addr -> (push addr p.portValue e)
+  | Some addr -> (push_local addr p.portValue e)
   | None -> e
 ;;
 let write_port_edges p g =
@@ -1186,28 +1149,50 @@ let tick_graph_topo graph e =
   (clear_tokens graph, e);;
 
 
-(** this simulates the arrival of new data in the environment :
+(** this simulates the arrival of new data in the global environment :
     audio inputs, etc. **)
-let update e = e;;
+let update e ext_events olddate date =
+  let new_msgs = ext_events olddate date in
+  let rec apply e msgs = match msgs with
+  | [] -> e
+  | (var,v)::t -> apply (push_global var v e) t
+  in apply e new_msgs
+;;
 
 (** overall main loop: run a score for some amount of time,
     at a given granularity (eg tick every 50 units) **)
-let main_loop root graph duration granularity (state:score_state) glob_env =
-    let rec main_loop_rec root graph duration granularity (state:score_state) funs glob_env  =
-      if duration > 0
+let main_loop root graph duration granularity (state:score_state) ext_events ext_modifications =
+    let total_dur = duration in
+    let rec main_loop_rec root graph remaining old_remaining granularity (state:score_state) funs =
+      if remaining > 0
       then
         (
-        Printf.printf "\nmain_loop before: "; print_state state;
+        let elapsed = total_dur - remaining in
+        let old_elapsed = total_dur - old_remaining in
+
+        (* some external action at this time may change the internal structure *)
+        let (root,graph,state) = ext_modifications root graph state old_elapsed elapsed  in
+
+        (* tick the time and get functions to execute *)
         let (state, new_funs) = tick_interval root granularity 0 state in
-        Printf.printf "main_loop after: "; print_state state;
-        let (graph, e)    = tick_graph_topo (update_graph (funs@new_funs) graph) state.scoreEnv in
-        main_loop_rec root graph (duration - granularity) granularity { state with scoreEnv = (update (commit e)) } [] glob_env
+
+        (* run the graph with the applied functions *)
+        let (graph, e)        = tick_graph_topo (update_graph (funs@new_funs) graph) state.scoreEnv in
+
+        (* go on to the next tick *)
+        main_loop_rec
+            root graph
+            (remaining - granularity)
+            old_remaining
+            granularity
+            { state with scoreEnv = (update (commit e) ext_events old_elapsed elapsed) }
+            []
         )
       else
         (root, graph, state)
     in
     let (state, funs) = start_interval root state in
-    main_loop_rec root graph duration granularity state funs glob_env
+    main_loop_rec root graph duration duration granularity state funs
 ;;
 
 
@@ -1273,6 +1258,7 @@ remove_node nodes 1;;
 
 let test_n = { name = "foo"; param = Some (Float 3.4); children = [] } ;;
 
+
 (* Complete example: 2-track sequencer *)
 (* 1. Create data graph *)
 
@@ -1284,7 +1270,6 @@ let (itv_node_2, test_g) = add_node test_g some_passthrough in
 let (itv_node_3, test_g) = add_node test_g some_passthrough in
 let (sc_node_1, test_g) = add_node test_g some_passthrough in
 let (itv_node_4, test_g) = add_node test_g some_passthrough in
-
 
 
 (* 2. Create temporal structures *)
@@ -1336,7 +1321,6 @@ let test_TC_1 = {
   syncExpr = true_expression;
   conds = [ {
       icId = InstCondId 1;
-      parentSync = TempCondId 1;
       condExpr = true_expression;
       previousItv = [ ];
       nextItv = [ IntervalId 1 ];
@@ -1348,7 +1332,6 @@ let test_TC_2 = {
   syncExpr = true_expression;
   conds = [ {
       icId = InstCondId 2;
-      parentSync = TempCondId 2;
       condExpr = true_expression;
       previousItv = [ IntervalId 1 ];
       nextItv = [ IntervalId 2 ];
@@ -1360,7 +1343,6 @@ let test_TC_3 = {
   syncExpr = true_expression;
   conds = [ {
       icId = InstCondId 3;
-      parentSync = TempCondId 3;
       condExpr = true_expression;
       previousItv = [ IntervalId 2 ];
       nextItv = [ IntervalId 3 ];
@@ -1372,7 +1354,6 @@ let test_TC_4 = {
   syncExpr = true_expression;
   conds = [ {
       icId = InstCondId 4;
-      parentSync = TempCondId 4;
       condExpr = true_expression;
       previousItv = [ IntervalId 3 ];
       nextItv = [  ];
@@ -1402,8 +1383,9 @@ let test_root = {
   ]
 } in
 let empty_state = { scoreEnv = empty_env; ic_statuses = []; itv_dates = []; listeners = []; rootTCs = [] }in
-let glob_env = 0 in
-let (a,b,c) = main_loop test_root test_g 7000 1000 empty_state glob_env in
+let glob_env d1 d2 = [] in
+let glob_cmds a b c dold dnew = (a,b,c) in
+let (a,b,c) = main_loop test_root test_g 7000 1000 empty_state glob_env glob_cmds in
 c;;
 
  (*
