@@ -218,7 +218,6 @@ type port = {
     portId: portId;
     portAddr: string option;
     portEdges: edgeId list;
-    portValue: value option
 };;
 
 type curve = float -> float;;
@@ -231,7 +230,7 @@ type passthrough = port * port;;
 
 (* tokens *)
 type token_request = {
-  tokenDate: duration;
+  token_date: duration;
   position: position;
   offset: duration;
   start_discontinuous: bool;
@@ -239,7 +238,7 @@ type token_request = {
 };;
 
 let make_token dur pos off =
-  { tokenDate = dur;
+  { token_date = dur;
     position = pos;
     offset = off;
     start_discontinuous = false;
@@ -255,9 +254,6 @@ type dataNode =
 type grNode = {
     nodeId: nodeId;
     data: dataNode;
-    executed: bool;
-    prev_date: duration;
-    tokens: token_request list;
 };;
 
 type graph = {
@@ -265,17 +261,23 @@ type graph = {
     edges: edge list;
 };;
 
+type grNodeState = {
+  executed: bool;
+  prev_date: duration;
+  tokens: token_request list
+};;
+type graph_state = {
+    node_state: (nodeId * grNodeState) list;
+    port_state: (portId * value option) list
+};;
+
 (* utilities and tests *)
 let create_graph = { nodes = []; edges = [] } ;;
-
-let push_token token node =
-  { node with tokens = (node.tokens@[token]); }
-;;
 
 let next_node_id lst = NodeId (next_id lst (fun n -> let (NodeId id) = n.nodeId in id));;
 let next_edge_id lst = EdgeId (next_id lst (fun n -> let (EdgeId id) = n.edgeId in id));;
 
-let create_port = { portId = PortId 0; portAddr = None; portEdges = []; portValue = None; } ;;
+let create_port = { portId = PortId 0; portAddr = None; portEdges = []; } ;;
 
 (* get a new port id for when adding nodes to the graph *)
 let last_port_id graph =
@@ -307,7 +309,7 @@ let add_node gr nodeDat =
         update_port_id ip (last_port_id + 1),
         update_port_id op (last_port_id + 2));
   in
-  let new_node = { nodeId = new_id; data = newNodeDat; executed = false; prev_date = 0; tokens = [ ]; } in
+  let new_node = { nodeId = new_id; data = newNodeDat; } in
   (new_node, { gr with nodes = new_node::gr.nodes; })
 ;;
 
@@ -325,6 +327,9 @@ let add_edge gr src snk t =
 (* find a node in a graph by id *)
 let find_node graph nodeId =
   List.find (fun n -> n.nodeId = nodeId) graph.nodes
+;;
+let find_node_state graph nodeId =
+  List.assoc nodeId graph.node_state
 ;;
 let find_edge graph edgeId =
   List.find (fun n -> n.edgeId = edgeId) graph.edges
@@ -353,6 +358,9 @@ let find_port graph portId =
   impl portId graph.nodes
 ;;
 
+let find_port_state graph portId =
+  List.assoc portId graph.port_state
+;;
 (* find the node of a port in a graph *)
 let find_port_node graph portId =
   let rec impl portId nodes =
@@ -377,19 +385,267 @@ let replace_node graph nodeId newNode =
   { graph with
     nodes = List.map (fun n -> if n.nodeId = nodeId then newNode else n) graph.nodes;
   };;
+let replace_node_state graph nodeId newNode =
+  { graph with
+    node_state = list_assoc_replace graph.node_state nodeId newNode
+  };;
 
 let graph_ident g = g;;
 
 (* register a tick to a node in the graph and return the new graph *)
-let add_tick_to_node nodeId token graph =
+let add_tick_to_node nodeId token (graph:graph_state) =
   (* tokens go from oldest to newest *)
-  let node = (find_node graph nodeId) in
-  let new_node = {
-    node with
-    tokens = node.tokens @ [ token ];
+  let cur_state = (find_node_state graph nodeId) in
+  let new_state = {
+    cur_state with
+    tokens = cur_state.tokens @ [ token ];
   } in
-  replace_node graph nodeId new_node
+  replace_node_state graph nodeId new_state
 ;;
+
+
+
+(*****************************
+ * graph execution functions *
+ *****************************)
+
+(* apply a list of functions to the state of the graph *)
+let update_graph fun_list graph =
+  let apply_rev_fun g f = f g in
+  List.fold_left apply_rev_fun graph fun_list ;;
+
+let is_enabled n = (List.length n.tokens) = 0;;
+
+(* todo : disables all nodes which are in strict relationship with a disabled node. *)
+let disable_strict_nodes nodes =
+  nodes;;
+
+(* todo : topologically sorted list of nodes *)
+let topo_sort graph =
+  graph.nodes;;
+
+(* todo : when a node can execute *)
+let can_execute nodes = true;;
+
+let replace_value p gs v = { gs with port_state = list_assoc_replace gs.port_state p.portId v };;
+(* remove the data stored in a port *)
+let clear_port p gs = replace_value p gs None;;
+
+let get_edges edges gr =
+  List.find_all (fun x -> List.mem x.edgeId edges) gr.edges;;
+
+(* some combination function *)
+let combine (v1:value) (v2:value) =
+  match (v1, v2) with
+  | (Audio a1, Audio a2) -> Audio a1 (* mix audio *)
+  | (_,v) -> v;; (* take latest *)
+
+(* reads the data of the source when there is a cable between two ports *)
+let get_src_value edge gr gs =
+  let src_val = find_port_state gs edge.source in
+  match edge.edgeType with
+  | Strict -> src_val
+  | Glutton -> src_val
+  (* these have their own buffer line where data is copied *)
+  | DelayedStrict dl -> raise Todo;
+  | DelayedGlutton dl -> raise Todo;
+;;
+
+(* combine read data with existing data in a port *)
+let aggregate_data gr gs (v: value option) edge  =
+  match (v, get_src_value edge gr gs) with
+  | (None, None) -> None
+  | (None, v) -> v
+  | (v, None) -> v
+  | (Some v1, Some v2) -> Some (combine v1 v2)
+;;
+
+(* copy data from the cables & environment to the port *)
+let init_port (p:port) g gs (e:environment) =
+  match p.portEdges with
+  (* no edges: read from the env *)
+  | [] -> let pv = match p.portAddr with
+                | None -> None
+                | Some str -> Some (pull str e)
+                in
+         replace_value p gs pv
+  (* edges: read from them *)
+  | _ -> replace_value p gs (List.fold_left (aggregate_data g gs) None (get_edges p.portEdges g) )
+  ;;
+
+(* this sets-up a node for before its execution *)
+let init_node n g gs (e:environment) =
+  (* clear the outputs of the node *)
+  (* and copy data from the environment or edges to the inputs *)
+  match n.data with
+    | Automation (op, curve)  -> clear_port op gs;
+
+    | Mapping (ip, op, curve) -> let gs = clear_port op gs in
+                                 init_port ip g gs e
+
+    | Sound (op, audio)       -> clear_port op gs;
+
+    | Passthrough (ip, op)    -> let gs = clear_port op gs in
+                                 init_port ip g gs e
+;;
+
+(* actual implementation of the execution algorithm for each kind of process... not really relevant *)
+let exec_node_impl data gs token =
+  gs
+;;
+let exec_node g gs n ns token =
+  let gs = exec_node_impl n.data gs token in
+  { gs with
+    node_state = list_assoc_replace gs.node_state n.nodeId {
+                      ns with
+                      executed = true;
+                      prev_date = token.token_date;
+                    }
+};;
+
+let in_port_disabled edge graph =
+  not (is_enabled (find_node_state (find_port_node graph (find_edge graph edge).sink).nodeId));;
+
+let write_port_env p e =
+  match p.portAddr with
+  | Some addr -> (push_local addr p.portValue e)
+  | None -> e
+;;
+let write_port_edges p g =
+  g (*todo*)
+;;
+
+(* write the data in a port to the cables or environment if available *)
+let write_port p g e =
+  let has_targets = (p.portEdges = []) in
+  let all_targets_disabled =
+    has_targets &&
+    List.for_all (fun x -> in_port_disabled x g) p.portEdges in
+  if(not has_targets || all_targets_disabled) then
+    (g, write_port_env p e)
+  else
+    (write_port_edges p g, e)
+;;
+
+(* clear the inputs of a node, and copy its outputs to the environment & delay lines *)
+let teardown_node n g e =
+  let (g_res, data_res, e_res) =
+  match n.data with
+  | Automation (op, curve) -> let (g, e) = write_port op g e in (g, Automation (op, curve), e);
+  | Sound (op, snd) -> let (g, e) = write_port op g e in (g, Sound (op, snd), e);
+  | Mapping (ip, op, curve) -> let (g, e) = write_port op g e in (g, Mapping (clear_port ip, op, curve), e);
+  | Passthrough (ip, op) -> let (g, e) = write_port op g e in (g, Passthrough (clear_port ip, op), e);
+  in
+  ({ n with data = data_res}, g_res, e_res);;
+
+(* todo *)
+
+(* any input has an edge going in *)
+let has_port_input node = true;;
+
+(* any input has an address present in the local scope *)
+let has_local_input node = true;;
+
+(* any input has an address present in the global scope *)
+let has_global_input node = true;;
+
+(* remove all the tokens of all the nodes *)
+let clear_tokens graph =
+  let rec impl before after =
+    match before with
+    | [ ] -> { graph with nodes = after }
+    | h :: t -> impl t ({h with tokens = [ ]} :: after)
+  in
+    impl graph.nodes [ ]
+;;
+
+(* finds which element occurs at the earliest in a list *)
+let rec find_first sorted_nodes n1 n2 =
+  match sorted_nodes with
+  | [ ] -> raise (Failure "can't happen");
+  | h :: t-> if h = n1 then
+      1
+    else if h = n2 then
+      -1
+    else find_first t n1 n2;;
+
+let nodes_sort sorted_nodes n1 n2 =
+  let p1 = has_port_input n1 in
+  let p2 = has_port_input n2 in
+  let l1 = has_local_input n1 in
+  let l2 = has_local_input n2 in
+  let g1 = has_global_input n1 in
+  let g2 = has_global_input n2 in
+  if p1 && not p2 then
+    1
+  else if not p1 && p2 then
+    -1
+  else if p1 && p2 then
+    find_first sorted_nodes n1 n2
+
+  else if l1 && not l2 then
+    1
+  else if not l1 && l2 then
+    -1
+  else if l1 && l2 then
+    find_first sorted_nodes n1 n2
+
+  else if g1 && not g2 then
+    1
+  else if not g1 && g2 then
+    -1
+  else
+    find_first sorted_nodes n1 n2
+;;
+
+let rec sub_tick graph nodes (e:environment) =
+  match nodes with
+  | [ ] -> (graph, e);
+  | _ ->
+    (* look for all the nodes that can be executed at this point *)
+    let next_nodes = List.filter can_execute nodes in
+
+    (* order them and run the first one *)
+    let next_nodes = List.sort (nodes_sort next_nodes) next_nodes in
+    match next_nodes with
+    | [ ] -> (graph, e) ;
+    | cur_node::q ->
+      (* set it up by copying data to its inputs *)
+      let cur_node = init_node cur_node graph e in
+
+      (* execute all the sub-ticks for this node *)
+      (* note: actually it's ok to reuse the same environment: it is only used for reading *)
+      let cur_node = List.fold_left (exec_node graph) cur_node cur_node.tokens in
+
+      (* clear its inputs and copy its outputs to the environment or delay lines if relevant *)
+      let (cur_node, graph, e) = teardown_node cur_node graph e in
+
+      (* repeat on the updated graph, with the remaining nodes *)
+      sub_tick
+        (replace_node graph cur_node.nodeId cur_node)
+        (remove_node next_nodes cur_node.nodeId)
+        e ;;
+
+
+let tick_graph_topo graph e =
+  (* we mark the nodes which had tokens posted to as enabled *)
+  let enabled_nodes = disable_strict_nodes (List.filter is_enabled graph.nodes) in
+  let sorted_nodes = topo_sort graph in
+  let filtered_nodes = List.filter (fun n -> (List.mem n enabled_nodes)) sorted_nodes in
+  let (graph, e) = sub_tick graph filtered_nodes e in
+  (clear_tokens graph, e);;
+
+
+(** this simulates the arrival of new data in the global environment :
+    audio inputs, etc. **)
+let update e ext_events olddate date =
+  let new_msgs = ext_events olddate date in
+  let rec apply e msgs = match msgs with
+  | [] -> e
+  | (var,v)::t -> apply (push_global var v e) t
+  in apply e new_msgs
+;;
+
 
 
 
@@ -923,241 +1179,6 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
 ;;
 
 
-
-(*****************************
- * graph execution functions *
- *****************************)
-
-(* apply a list of functions to the state of the graph *)
-let update_graph fun_list graph =
-  let apply_rev_fun g f = f g in
-  List.fold_left apply_rev_fun graph fun_list ;;
-
-let is_enabled n = (List.length n.tokens) = 0;;
-
-(* todo : disables all nodes which are in strict relationship with a disabled node. *)
-let disable_strict_nodes nodes =
-  nodes;;
-
-(* todo : topologically sorted list of nodes *)
-let topo_sort graph =
-  graph.nodes;;
-
-(* todo : when a node can execute *)
-let can_execute nodes = true;;
-
-(* remove the data stored in a port *)
-let clear_port p = { p with portValue = None };;
-
-let get_edges edges gr =
-  List.find_all (fun x -> List.mem x.edgeId edges) gr.edges;;
-
-(* some combination function *)
-let combine (v1:value) (v2:value) =
-  match (v1, v2) with
-  | (Audio a1, Audio a2) -> Audio a1 (* mix audio *)
-  | (_,v) -> v;; (* take latest *)
-
-(* reads the data of the source when there is a cable between two ports *)
-let get_src_value edge gr =
-  let src_port = find_port gr edge.source in
-  match edge.edgeType with
-  | Strict -> src_port.portValue
-  | Glutton -> src_port.portValue
-  (* these have their own buffer line where data is copied *)
-  | DelayedStrict dl -> raise Todo;
-  | DelayedGlutton dl -> raise Todo;
-;;
-
-(* combine read data with existing data in a port *)
-let aggregate_data gr (v: value option) edge  =
-  match (v, get_src_value edge gr) with
-  | (None, None) -> None
-  | (None, v) -> v
-  | (v, None) -> v
-  | (Some v1, Some v2) -> Some (combine v1 v2)
-;;
-
-(* copy data from the cables & environment to the port *)
-let init_port (p:port) g (e:environment) =
-  match p.portEdges with
-  (* no edges: read from the env *)
-  | [] -> let pv = match p.portAddr with
-                | None -> None
-                | Some str -> Some (pull str e)
-                in
-         { p with portValue = pv }
-  (* edges: read from them *)
-  | _ -> { p with portValue = (
-                List.fold_left (aggregate_data g) None (get_edges p.portEdges g) )
-         }
-  ;;
-
-(* this sets-up a node for before its execution *)
-let init_node n g (e:environment) =
-  (* clear the outputs of the node *)
-  (* and copy data from the environment or edges to the inputs *)
-  { n with data =
-        match n.data with
-        | Automation (op, curve) -> Automation (clear_port op, curve) ;
-        | Mapping (ip, op, curve) -> Mapping (init_port ip g e, clear_port op, curve) ;
-        | Sound (op, audio) -> Sound (clear_port op, audio) ;
-        | Passthrough (ip, op) -> Passthrough (init_port ip g e, clear_port op);
-};;
-
-(* actual implementation of the execution algorithm for each kind of process... not really relevant *)
-let exec_node_impl data token =
-  data
-;;
-let exec_node g n token =
-  { n with
-    data = exec_node_impl n.data token;
-    executed = true;
-    prev_date = token.tokenDate;
-};;
-
-let in_port_disabled edge graph =
-  not (is_enabled (find_port_node graph (find_edge graph edge).sink));;
-
-let write_port_env p e =
-  match p.portAddr with
-  | Some addr -> (push_local addr p.portValue e)
-  | None -> e
-;;
-let write_port_edges p g =
-  g (*todo*)
-;;
-
-(* write the data in a port to the cables or environment if available *)
-let write_port p g e =
-  let has_targets = (p.portEdges = []) in
-  let all_targets_disabled =
-    has_targets &&
-    List.for_all (fun x -> in_port_disabled x g) p.portEdges in
-  if(not has_targets || all_targets_disabled) then
-    (g, write_port_env p e)
-  else
-    (write_port_edges p g, e)
-;;
-
-(* clear the inputs of a node, and copy its outputs to the environment & delay lines *)
-let teardown_node n g e =
-  let (g_res, data_res, e_res) =
-  match n.data with
-  | Automation (op, curve) -> let (g, e) = write_port op g e in (g, Automation (op, curve), e);
-  | Sound (op, snd) -> let (g, e) = write_port op g e in (g, Sound (op, snd), e);
-  | Mapping (ip, op, curve) -> let (g, e) = write_port op g e in (g, Mapping (clear_port ip, op, curve), e);
-  | Passthrough (ip, op) -> let (g, e) = write_port op g e in (g, Passthrough (clear_port ip, op), e);
-  in
-  ({ n with data = data_res}, g_res, e_res);;
-
-(* todo *)
-
-(* any input has an edge going in *)
-let has_port_input node = true;;
-
-(* any input has an address present in the local scope *)
-let has_local_input node = true;;
-
-(* any input has an address present in the global scope *)
-let has_global_input node = true;;
-
-(* remove all the tokens of all the nodes *)
-let clear_tokens graph =
-  let rec impl before after =
-    match before with
-    | [ ] -> { graph with nodes = after }
-    | h :: t -> impl t ({h with tokens = [ ]} :: after)
-  in
-    impl graph.nodes [ ]
-;;
-
-(* finds which element occurs at the earliest in a list *)
-let rec find_first sorted_nodes n1 n2 =
-  match sorted_nodes with
-  | [ ] -> raise (Failure "can't happen");
-  | h :: t-> if h = n1 then
-      1
-    else if h = n2 then
-      -1
-    else find_first t n1 n2;;
-
-let nodes_sort sorted_nodes n1 n2 =
-  let p1 = has_port_input n1 in
-  let p2 = has_port_input n2 in
-  let l1 = has_local_input n1 in
-  let l2 = has_local_input n2 in
-  let g1 = has_global_input n1 in
-  let g2 = has_global_input n2 in
-  if p1 && not p2 then
-    1
-  else if not p1 && p2 then
-    -1
-  else if p1 && p2 then
-    find_first sorted_nodes n1 n2
-
-  else if l1 && not l2 then
-    1
-  else if not l1 && l2 then
-    -1
-  else if l1 && l2 then
-    find_first sorted_nodes n1 n2
-
-  else if g1 && not g2 then
-    1
-  else if not g1 && g2 then
-    -1
-  else
-    find_first sorted_nodes n1 n2
-;;
-
-let rec sub_tick graph nodes (e:environment) =
-  match nodes with
-  | [ ] -> (graph, e);
-  | _ ->
-    (* look for all the nodes that can be executed at this point *)
-    let next_nodes = List.filter can_execute nodes in
-
-    (* order them and run the first one *)
-    let next_nodes = List.sort (nodes_sort next_nodes) next_nodes in
-    match next_nodes with
-    | [ ] -> (graph, e) ;
-    | cur_node::q ->
-      (* set it up by copying data to its inputs *)
-      let cur_node = init_node cur_node graph e in
-
-      (* execute all the sub-ticks for this node *)
-      (* note: actually it's ok to reuse the same environment: it is only used for reading *)
-      let cur_node = List.fold_left (exec_node graph) cur_node cur_node.tokens in
-
-      (* clear its inputs and copy its outputs to the environment or delay lines if relevant *)
-      let (cur_node, graph, e) = teardown_node cur_node graph e in
-
-      (* repeat on the updated graph, with the remaining nodes *)
-      sub_tick
-        (replace_node graph cur_node.nodeId cur_node)
-        (remove_node next_nodes cur_node.nodeId)
-        e ;;
-
-
-let tick_graph_topo graph e =
-  (* we mark the nodes which had tokens posted to as enabled *)
-  let enabled_nodes = disable_strict_nodes (List.filter is_enabled graph.nodes) in
-  let sorted_nodes = topo_sort graph in
-  let filtered_nodes = List.filter (fun n -> (List.mem n enabled_nodes)) sorted_nodes in
-  let (graph, e) = sub_tick graph filtered_nodes e in
-  (clear_tokens graph, e);;
-
-
-(** this simulates the arrival of new data in the global environment :
-    audio inputs, etc. **)
-let update e ext_events olddate date =
-  let new_msgs = ext_events olddate date in
-  let rec apply e msgs = match msgs with
-  | [] -> e
-  | (var,v)::t -> apply (push_global var v e) t
-  in apply e new_msgs
-;;
 
 (** overall main loop: run a score for some amount of time,
     at a given granularity (eg tick every 50 units) **)
