@@ -338,6 +338,20 @@ let find_edge graph edgeId =
 (* find a port in a graph by id *)
 exception PortNotFound;;
 
+let get_all_ports graph =
+  let rec impl nodes cur =
+  match nodes with
+  | [ ] -> cur
+  | h :: t ->
+    match h.data with
+    | Automation (op, _) -> impl t (op::cur)
+    | Mapping (ip, op, _) -> impl t (ip::op::cur)
+    | Sound (op, _) -> impl t (op::cur)
+    | Passthrough (ip, op) ->  impl t (ip::op::cur)
+  in
+  impl graph.nodes []
+;;
+
 let find_port graph portId =
   let rec impl portId nodes =
   match nodes with
@@ -393,14 +407,14 @@ let replace_node_state graph nodeId newNode =
 let graph_ident g = g;;
 
 (* register a tick to a node in the graph and return the new graph *)
-let add_tick_to_node nodeId token (graph:graph_state) =
+let add_tick_to_node nodeId token (gs:graph_state) =
   (* tokens go from oldest to newest *)
-  let cur_state = (find_node_state graph nodeId) in
+  let cur_state = (find_node_state gs nodeId) in
   let new_state = {
     cur_state with
     tokens = cur_state.tokens @ [ token ];
   } in
-  replace_node_state graph nodeId new_state
+  replace_node_state gs nodeId new_state
 ;;
 
 
@@ -417,8 +431,8 @@ let update_graph fun_list graph =
 let is_enabled n = (List.length n.tokens) = 0;;
 
 (* todo : disables all nodes which are in strict relationship with a disabled node. *)
-let disable_strict_nodes nodes =
-  nodes;;
+let disable_strict_nodes nodes gs =
+  gs;;
 
 (* todo : topologically sorted list of nodes *)
 let topo_sort graph =
@@ -503,12 +517,12 @@ let exec_node g gs n ns token =
                     }
 };;
 
-let in_port_disabled edge graph =
-  not (is_enabled (find_node_state (find_port_node graph (find_edge graph edge).sink).nodeId));;
+let in_port_disabled edge graph gs =
+  not (is_enabled (find_node_state gs (find_port_node graph (find_edge graph edge).sink).nodeId));;
 
-let write_port_env p e =
+let write_port_env p gs e =
   match p.portAddr with
-  | Some addr -> (push_local addr p.portValue e)
+  | Some addr -> (push_local addr (find_port_state gs p.portId) e)
   | None -> e
 ;;
 let write_port_edges p g =
@@ -516,27 +530,27 @@ let write_port_edges p g =
 ;;
 
 (* write the data in a port to the cables or environment if available *)
-let write_port p g e =
+let write_port p (g:graph) (gs:graph_state) (e:environment) =
   let has_targets = (p.portEdges = []) in
   let all_targets_disabled =
     has_targets &&
-    List.for_all (fun x -> in_port_disabled x g) p.portEdges in
+    List.for_all (fun x -> in_port_disabled x g gs) p.portEdges in
   if(not has_targets || all_targets_disabled) then
-    (g, write_port_env p e)
+    (gs, write_port_env p gs e)
   else
-    (write_port_edges p g, e)
+    (write_port_edges p gs, e)
 ;;
 
 (* clear the inputs of a node, and copy its outputs to the environment & delay lines *)
-let teardown_node n g e =
-  let (g_res, data_res, e_res) =
+let teardown_node n g gs e =
   match n.data with
-  | Automation (op, curve) -> let (g, e) = write_port op g e in (g, Automation (op, curve), e);
-  | Sound (op, snd) -> let (g, e) = write_port op g e in (g, Sound (op, snd), e);
-  | Mapping (ip, op, curve) -> let (g, e) = write_port op g e in (g, Mapping (clear_port ip, op, curve), e);
-  | Passthrough (ip, op) -> let (g, e) = write_port op g e in (g, Passthrough (clear_port ip, op), e);
-  in
-  ({ n with data = data_res}, g_res, e_res);;
+  | Automation (op, _)      -> write_port op g gs e;
+  | Sound (op, _)           -> write_port op g gs e;
+  | Mapping (ip, op, curve) -> let (gs, e) = write_port op g gs e in
+                               (clear_port ip gs, e);
+  | Passthrough (ip, op)    -> let (gs, e) = write_port op g gs e in
+                               (clear_port ip gs, e);
+;;
 
 (* todo *)
 
@@ -550,13 +564,13 @@ let has_local_input node = true;;
 let has_global_input node = true;;
 
 (* remove all the tokens of all the nodes *)
-let clear_tokens graph =
+let clear_tokens (graph:graph_state) =
   let rec impl before after =
     match before with
-    | [ ] -> { graph with nodes = after }
-    | h :: t -> impl t ({h with tokens = [ ]} :: after)
+    | [ ] -> { graph with node_state = after }
+    | (id, st) :: t -> impl t ((id, {st with tokens = [ ]}) :: after)
   in
-    impl graph.nodes [ ]
+    impl graph.node_state [ ]
 ;;
 
 (* finds which element occurs at the earliest in a list *)
@@ -598,9 +612,9 @@ let nodes_sort sorted_nodes n1 n2 =
     find_first sorted_nodes n1 n2
 ;;
 
-let rec sub_tick graph nodes (e:environment) =
+let rec sub_tick graph gs nodes (e:environment) =
   match nodes with
-  | [ ] -> (graph, e);
+  | [ ] -> (gs, e);
   | _ ->
     (* look for all the nodes that can be executed at this point *)
     let next_nodes = List.filter can_execute nodes in
@@ -608,32 +622,78 @@ let rec sub_tick graph nodes (e:environment) =
     (* order them and run the first one *)
     let next_nodes = List.sort (nodes_sort next_nodes) next_nodes in
     match next_nodes with
-    | [ ] -> (graph, e) ;
+    | [ ] -> (gs, e) ;
     | cur_node::q ->
       (* set it up by copying data to its inputs *)
-      let cur_node = init_node cur_node graph e in
+      let gs = init_node cur_node graph gs e in
 
       (* execute all the sub-ticks for this node *)
       (* note: actually it's ok to reuse the same environment: it is only used for reading *)
-      let cur_node = List.fold_left (exec_node graph) cur_node cur_node.tokens in
+      let rec run_ticks_for_node g gs n tokens =
+        match tokens with
+        | [] -> gs
+        | token::t -> let gs = exec_node g gs n (List.assoc n.nodeId gs.node_state) token
+                      in run_ticks_for_node g gs n t
+      in
+      let gs = run_ticks_for_node graph gs cur_node (List.assoc cur_node.nodeId gs.node_state).tokens in
 
       (* clear its inputs and copy its outputs to the environment or delay lines if relevant *)
-      let (cur_node, graph, e) = teardown_node cur_node graph e in
+      let (gs, e) = teardown_node cur_node graph gs e in
 
       (* repeat on the updated graph, with the remaining nodes *)
       sub_tick
-        (replace_node graph cur_node.nodeId cur_node)
+        graph
+        gs
         (remove_node next_nodes cur_node.nodeId)
         e ;;
 
+let get_enabled_nodes g gs =
+  let en = List.filter (fun (id,{ tokens = t }) -> (List.length t) <> 0) gs.node_state in
+  let (ids, _) = List.split en in
+  List.find_all (fun x -> List.exists (fun y -> y = x.nodeId) ids) g.nodes;;
 
-let tick_graph_topo graph e =
+let add_missing graph gs =
+  let rec add_missing_nodes gs nodes =
+  match nodes with
+  | [] -> gs
+  | node::t -> if List.mem_assoc node.nodeId gs.node_state
+               then
+                add_missing_nodes gs t
+               else
+                add_missing_nodes { gs with node_state =
+                    (node.nodeId, {
+                        prev_date = 0;
+                        tokens = [];
+                        executed = false;
+                        }) :: gs.node_state
+                } t
+  in
+  let rec add_missing_ports gs ports =
+  match ports with
+  | [] -> gs
+  | port::t -> if List.mem_assoc port.portId gs.port_state
+               then
+                add_missing_ports gs t
+               else
+                add_missing_ports { gs with port_state =
+                    (port.portId, None) :: gs.port_state
+                } t
+  in
+  add_missing_nodes (add_missing_ports gs (get_all_ports graph)) graph.nodes
+
+let tick_graph_topo graph gs e =
+
   (* we mark the nodes which had tokens posted to as enabled *)
-  let enabled_nodes = disable_strict_nodes (List.filter is_enabled graph.nodes) in
+  let gs = disable_strict_nodes (get_enabled_nodes graph gs) gs in
+  let enabled_nodes = (get_enabled_nodes graph gs) in
   let sorted_nodes = topo_sort graph in
   let filtered_nodes = List.filter (fun n -> (List.mem n enabled_nodes)) sorted_nodes in
-  let (graph, e) = sub_tick graph filtered_nodes e in
-  (clear_tokens graph, e);;
+
+  (* we have a set of nodes that we now run: *)
+  let (gs, e) = sub_tick graph gs filtered_nodes e in
+
+  (* once all the nodes are ran, remove their tokens *)
+  (clear_tokens gs, e);;
 
 
 (** this simulates the arrival of new data in the global environment :
@@ -1058,7 +1118,7 @@ and scenario_process_TC scenario tc (state:score_state) =
     if ((tc.syncExpr <> true_expression) && (not tcMaxDurReached))
     then
       (**** todo ****)
-      let tc = { tc with syncExpr = update tc.syncExpr } in
+      let tc = tc (*{ tc with syncExpr = update tc.syncExpr }*) in
 
       if (not (evaluate tc.syncExpr state.scoreEnv state.listeners))
       then
@@ -1184,7 +1244,9 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
     at a given granularity (eg tick every 50 units) **)
 let main_loop root graph duration granularity (state:score_state) ext_events ext_modifications =
     let total_dur = duration in
-    let rec main_loop_rec root graph remaining old_remaining granularity (state:score_state) funs =
+    let rec main_loop_rec root graph
+                          remaining old_remaining granularity
+                          (state:score_state) (gs:graph_state) funs =
       if remaining > 0
       then
         (
@@ -1195,10 +1257,13 @@ let main_loop root graph duration granularity (state:score_state) ext_events ext
         let (root,graph,state) = ext_modifications root graph state old_elapsed elapsed  in
 
         (* tick the time and get functions to execute *)
-        let (state, new_funs) = tick_interval root granularity 0 state in
+        let (state, new_funs)  = tick_interval root granularity 0 state in
+
+        (* create states for nodes if required (eg if they have been added for some reason) *)
+        let gs = add_missing graph gs in
 
         (* run the graph with the applied functions *)
-        let (graph, e)        = tick_graph_topo (update_graph (funs@new_funs) graph) state.scoreEnv in
+        let (gs, e)            = tick_graph_topo graph (update_graph (funs@new_funs) gs) state.scoreEnv in
 
         (* go on to the next tick *)
         main_loop_rec
@@ -1207,13 +1272,15 @@ let main_loop root graph duration granularity (state:score_state) ext_events ext
             old_remaining
             granularity
             { state with scoreEnv = (update (commit e) ext_events old_elapsed elapsed) }
+            gs
             []
         )
       else
         (root, graph, state)
     in
     let (state, funs) = start_interval root state in
-    main_loop_rec root graph duration duration granularity state funs
+    let gs = { node_state = [] ; port_state = [] } in
+    main_loop_rec root graph duration duration granularity state gs funs
 ;;
 
 
@@ -1243,8 +1310,8 @@ let some_sound = Sound (create_port, some_sound_data);;
 let some_passthrough = Passthrough ( create_port, create_port );;
 
 (* test *)
-let test_node_1 = { nodeId = NodeId 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
-let test_node_2 = { nodeId = NodeId 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; } ;;
+let test_node_1 = { nodeId = NodeId 1; data = some_sound;  } ;;
+let test_node_2 = { nodeId = NodeId 34; data = some_sound; } ;;
 next_node_id [ test_node_1; test_node_2 ] ;;
 
 (* quick checks *)
@@ -1255,8 +1322,8 @@ let some_sound = Sound (create_port, some_sound_data);;
 let some_passthrough = Passthrough ( create_port, create_port);;
 
 (* quick checks *)
-let test_node_1 = { nodeId = NodeId 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; };;
-let test_node_2 = { nodeId = NodeId 34; data = some_sound; executed = false; prev_date = 0; tokens = [ ]; };;
+let test_node_1 = { nodeId = NodeId 1; data = some_sound; };;
+let test_node_2 = { nodeId = NodeId 34; data = some_sound; };;
 next_node_id [ test_node_1; test_node_2 ] ;;
 
 (* quick checks *)
@@ -1267,8 +1334,8 @@ let (p1, test_g) = add_node test_g some_passthrough;;
 
 
 let nodes = [
-    { nodeId = NodeId 1; data = some_sound; executed = false; prev_date = 0; tokens = [ ]};
-    { nodeId = NodeId 2; data = some_sound; executed = false; prev_date = 0; tokens = [ ] }
+    { nodeId = NodeId 1; data = some_sound; };
+    { nodeId = NodeId 2; data = some_sound; }
 ] in
 remove_node nodes (NodeId 1);;
 
