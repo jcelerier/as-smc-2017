@@ -101,31 +101,34 @@ let noenv_opt = fun v -> None;;
 type env = string -> value;;
 
 type environment = {
-  local: string -> value option;
-  global: string -> value
+  local: (string * value) list;
+  global: (string * value) list
 };;
 let empty_env = {
-  local = noenv_opt;
-  global = noenv
+  local = [];
+  global = []
 };;
 
 let pull var e =
-  match (e.local var) with
-  | None -> e.global var
+  match (List.assoc_opt var e.local) with
+  | None -> List.assoc var e.global
   | Some v -> v
 ;;
 let push_local var va e =
   { e with
-    local = fun v -> if v = var then va else (e.local var)
+    local = list_assoc_replace e.local var va
 };;
 let push_global var va e =
   { e with
-    global = fun v -> if v = var then va else (e.global var)
+    global = list_assoc_replace e.global var va
 };;
 (** in the C++ code this function applies
     the data recorded in the local environment to the global environment,
     write buffers to the sound card, etc etc *)
-let commit e = { e with local = noenv_opt };;
+let commit e = {
+    local = [];
+    global = list_assoc_merge e.global e.local
+};;
 
 
 
@@ -135,7 +138,6 @@ let commit e = { e with local = noenv_opt };;
 type impulseId = ImpulseId of int;;
 
 type expr_listener = {
-    exprId: impulseId;
     exprAddr: string;
     exprSet: bool
 };;
@@ -156,7 +158,7 @@ type expression =
 
 exception EvalError;;
 
-let rec evaluate expr (e:environment) (listeners:expr_listener list) =
+let rec evaluate expr (e:environment) (listeners:(impulseId*expr_listener) list) =
  let compare v1 v2 f =
    match (v1, v2) with
      | (Bool b1, Bool b2) -> f b1 b2
@@ -179,7 +181,7 @@ let rec evaluate expr (e:environment) (listeners:expr_listener list) =
   | Negation e1       -> not (evaluate e1 e listeners)
   | And (e1,e2)       -> (evaluate e1 e listeners) && (evaluate e2 e listeners)
   | Or (e1,e2)        -> (evaluate e1 e listeners) || (evaluate e2 e listeners)
-  | Impulse (id,str)  -> (List.find (fun el -> el.exprId = id) listeners).exprSet
+  | Impulse (id,str)  -> (List.assoc id listeners).exprSet
 
 (* env: need to know if a message was received on an address ? *)
 (* have a "listener" data structure: elements can insert listeners on the
@@ -189,7 +191,6 @@ let rec evaluate expr (e:environment) (listeners:expr_listener list) =
 let true_expression = Equal (Value (Bool true), Value (Bool true));;
 let false_expression = Equal (Value (Bool true), Value (Bool false));;
 
-let update expr = expr ;;
 
 type status = Waiting | Pending | Happened | Disposed;;
 
@@ -521,9 +522,9 @@ let in_port_disabled edge graph gs =
   not (is_enabled (find_node_state gs (find_port_node graph (find_edge graph edge).sink).nodeId));;
 
 let write_port_env p gs e =
-  match p.portAddr with
-  | Some addr -> (push_local addr (find_port_state gs p.portId) e)
-  | None -> e
+  match (p.portAddr, (find_port_state gs p.portId)) with
+  | (Some addr, Some var) -> (push_local addr var e)
+  | _ -> e
 ;;
 let write_port_edges p g =
   g (*todo*)
@@ -696,18 +697,6 @@ let tick_graph_topo graph gs e =
   (clear_tokens gs, e);;
 
 
-(** this simulates the arrival of new data in the global environment :
-    audio inputs, etc. **)
-let update e ext_events olddate date =
-  let new_msgs = ext_events olddate date in
-  let rec apply e msgs = match msgs with
-  | [] -> e
-  | (var,v)::t -> apply (push_global var v e) t
-  in apply e new_msgs
-;;
-
-
-
 
 
 (******************************
@@ -722,7 +711,7 @@ type score_state =
 {
  itv_dates: (intervalId * duration) list;
  ic_statuses: (instCondId * status) list;
- listeners: expr_listener list;
+ listeners: (impulseId*expr_listener) list;
  rootTCs: (processId * tempCondId list) list;
  scoreEnv: environment
 };;
@@ -789,6 +778,38 @@ and loop = {
   startTC: temporalCondition;
   endTC: temporalCondition;
 };;
+
+(* listeners *)
+let register_listener (id, var) lst =
+    let new_l = {
+        exprAddr = var;
+        exprSet = false
+    } in list_assoc_replace lst id new_l
+;;
+
+let register_listeners (expr:expression) lst =
+  let rec walk_imp lst expr =
+     match expr with
+      | Negation e1       -> (walk_imp lst e1)
+      | And (e1,e2)       -> walk_imp (walk_imp lst e1) e2
+      | Or (e1,e2)        -> walk_imp (walk_imp lst e1) e2
+      | Impulse (id, var) -> register_listener (id, var) lst
+      | _                 -> lst
+  in
+  walk_imp lst expr
+;;
+let unregister_listeners (expr:expression) lst =
+  let rec walk_imp lst expr =
+     match expr with
+      | Negation e1       -> (walk_imp lst e1)
+      | And (e1,e2)       -> walk_imp (walk_imp lst e1) e2
+      | Or (e1,e2)        -> walk_imp (walk_imp lst e1) e2
+      | Impulse (id, var) -> List.remove_assoc id lst
+      | _                 -> lst
+  in
+  walk_imp lst expr
+;;
+
 
 (* utility functions to work with scenario *)
 let find_prev_IC itv scenario =
@@ -1117,14 +1138,14 @@ and scenario_process_TC scenario tc (state:score_state) =
   else
     if ((tc.syncExpr <> true_expression) && (not tcMaxDurReached))
     then
-      (**** todo ****)
-      let tc = tc (*{ tc with syncExpr = update tc.syncExpr }*) in
+      let state = { state with listeners = register_listeners tc.syncExpr state.listeners } in
 
       if (not (evaluate tc.syncExpr state.scoreEnv state.listeners))
       then
         (* expression is false, do nothing apart updating the TC *)
         ((state, [ ], [ ]), false)
       else
+        let state = { state with listeners = unregister_listeners tc.syncExpr state.listeners } in
         (* the tc expression is true, we can proceed with the execution of what follows *)
         (execute_tc scenario tc state, true)
     else
@@ -1239,6 +1260,45 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
 ;;
 
 
+(*************
+ * main loop *
+ *************)
+
+(** this simulates the arrival of new data in the global environment :
+    audio inputs, etc. **)
+let update e ext_events olddate date =
+  let new_msgs = ext_events olddate date in
+  let rec apply e msgs =
+    match msgs with
+    | [] -> e
+    | (var,v)::t -> apply (push_global var v e) t
+  in apply e new_msgs
+;;
+
+let rec set_listener var lst =
+  let rec set_impl remaining l =
+  match remaining with
+  | [] -> l
+  | (ImpulseId id, { exprAddr = a })::t -> let l =
+                                             if var = a then
+                                               list_assoc_replace l (ImpulseId id) { exprAddr = a; exprSet = true }
+                                             else
+                                               l
+                                           in set_impl t l
+  in set_impl lst []
+;;
+let update_listeners lst local_e ext_events olddate date =
+  let new_msgs = ext_events olddate date in
+  let rec apply lst msgs =
+    match msgs with
+    | [] -> lst
+    | (var,v)::t -> apply (set_listener var lst) t
+  in
+  (* first apply the messages from outside *)
+  let lst = apply lst new_msgs in
+
+  (* then the ones in the local env *)
+  apply lst local_e
 
 (** overall main loop: run a score for some amount of time,
     at a given granularity (eg tick every 50 units) **)
@@ -1265,13 +1325,19 @@ let main_loop root graph duration granularity (state:score_state) ext_events ext
         (* run the graph with the applied functions *)
         let (gs, e)            = tick_graph_topo graph (update_graph (funs@new_funs) gs) state.scoreEnv in
 
+        (* update the state with things that may happen outside *)
+        let state = { state with
+                      scoreEnv = (update (commit e) ext_events old_elapsed elapsed);
+                      listeners = (update_listeners state.listeners e.local ext_events old_elapsed elapsed)
+        } in
+
         (* go on to the next tick *)
         main_loop_rec
             root graph
             (remaining - granularity)
             old_remaining
             granularity
-            { state with scoreEnv = (update (commit e) ext_events old_elapsed elapsed) }
+            state
             gs
             []
         )
