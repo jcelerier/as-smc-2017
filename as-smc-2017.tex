@@ -23,6 +23,7 @@
 
 
 \usepackage{listings}
+\lstset{language=caml,basicstyle=\scriptsize,columns=fixed}
 \usepackage{qtree}
 \usepackage{tkz-graph}  
 \usepackage{subcaption}
@@ -83,6 +84,8 @@
 \DeclareMathOperator{\ic}{IC}
 \DeclareMathOperator{\itv}{I}
 \DeclareMathOperator{\proc}{P}
+
+\newcommand{\includecode}[2][c]{\lstinputlisting[caption=#2, escapechar=]{#2}<!---->}
 \title{A model for interactive media authoring}
 \begin{document}
 
@@ -279,45 +282,52 @@ Expressions operate on addresses and values of the device tree presented in \ref
 Formally, expressions are defined as a tree:
 Let \textbf{Comparator} be an identifier for standard value comparison operations: $<, \leq, >, \geq, =, \neq$ and \textbf{Operator} standard logical operators \textbf{and} \&  \textbf{or}.
 
-\begin{align*}
-    \mathbf{Atom} & :  (\mathrm{Parameter} \mid \mathrm{Value}) \times (\mathrm{Parameter} \mid \mathrm{Value}) \times \mathrm{Comparator} \\
-    \mathbf{Negation} & : \mathrm{Expression} \\
-    \mathbf{Composition} & : \mathrm{Expression} \times \mathrm{Expression} \times \mathrm{Operator} \\
-    \mathbf{Impulse} & : \mathrm{Parameter} \times \mathrm{Bool} \\
-    \mathbf{Expression} &: \mathrm{Atom} \mid \mathrm{Negation} \mid \mathrm{Composition} \mid \mathrm{Impulse}
-\end{align*}
-
+\begin{lstlisting}
+type subexpr = Var of string | Value of value;;
+type expression =
+| Greater   of subexpr*subexpr
+| GreaterEq of subexpr*subexpr
+| Lower     of subexpr*subexpr
+| LowerEq   of subexpr*subexpr
+| Equal     of subexpr*subexpr
+| Different of subexpr*subexpr
+| Negation  of expression
+| And       of expression*expression
+| Or        of expression*expression
+| Impulse   of impulseId*string
+;;
+\end{lstlisting}
 Two operations are defined on expressions and the data types that compose them: 
 
-\begin{itemize}
-    \item $\mathbf{update}: \mathrm{Expression} \rightarrow \mathrm{Expression}$. Used to reset any internal state and query up-to-date values for the expressions. For instance, $\mathbf{update}$ on an $\mathbf{Atom}$ fetches if possible new values for the parameters, why may include network requests.
-    
-    Precisely:
-    \[
-    \begin{cases}
-    \mathrm{update} : & \mathrm{Composition} \rightarrow \mathrm{Composition} \\ 
-    & (e_1, e_2, o) \mapsto (\mathrm{update}~e_1, \mathrm{update}~e_2, o) \\
-    \mathrm{update} : & \mathrm{Negation} \rightarrow \mathrm{Negation} \\
-    &  e_1 \mapsto \mathrm{update}~ e_1 \\
-    \mathrm{update} :&  \mathrm{Atom} \rightarrow \mathrm{Atom} \\
-    & \begin{cases}
-    (\mathrm{parameter}~p_1, \mathrm{parameter}~p_2, o) \mapsto (\mathrm{pull}~p_1, \mathrm{pull}~p_2, o) \\
-    (\mathrm{parameter}~p_1, \mathrm{value}~v_2, o) \mapsto (\mathrm{pull}~p_1, v_2, o) \\ 
-    \dots
-    \end{cases}\\
-    \mathrm{update} : & \mathrm{Impulse} \rightarrow \mathrm{Impulse} \\
-    & (p, b) \mapsto (p, \mathrm{false})
-    \end{cases}
-    \] 
-        
-    \item $\mathbf{evaluate}: \mathrm{Expression} \rightarrow \mathrm{Bool}$. Performs the actual logical expression evaluation, according to the expected logical rules.
-     % TODO spécifier correctement Pulse
-\end{itemize}
+%\begin{itemize}
+%    \item $\mathbf{update}: \mathrm{Expression} \rightarrow \mathrm{Expression}$. Used to reset any internal state and query up-to-date values for the expressions. For instance, $\mathbf{update}$ on an $\mathbf{Atom}$ fetches if possible new values for the parameters, why may include network requests.
+%    
+%    Precisely:
+%    \[
+%    \begin{cases}
+%    \mathrm{update} : & \mathrm{Composition} \rightarrow \mathrm{Composition} \\ 
+%    & (e_1, e_2, o) \mapsto (\mathrm{update}~e_1, \mathrm{update}~e_2, o) \\
+%    \mathrm{update} : & \mathrm{Negation} \rightarrow \mathrm{Negation} \\
+%    &  e_1 \mapsto \mathrm{update}~ e_1 \\
+%    \mathrm{update} :&  \mathrm{Atom} \rightarrow \mathrm{Atom} \\
+%    & \begin{cases}
+%    (\mathrm{parameter}~p_1, \mathrm{parameter}~p_2, o) \mapsto (\mathrm{pull}~p_1, \mathrm{pull}~p_2, o) \\
+%    (\mathrm{parameter}~p_1, \mathrm{value}~v_2, o) \mapsto (\mathrm{pull}~p_1, v_2, o) \\ 
+%    \dots
+%    \end{cases}\\
+%    \mathrm{update} : & \mathrm{Impulse} \rightarrow \mathrm{Impulse} \\
+%    & (p, b) \mapsto (p, \mathrm{false})
+%    \end{cases}
+%    \] 
+%        
+%    \item $\mathbf{evaluate}: \mathrm{Expression} \rightarrow \mathrm{Bool}$. Performs the actual logical expression evaluation, according to the expected logical rules.
+%     % TODO spécifier correctement Pulse
+%\end{itemize}
 
 \begin{itemize}
     \item An atom is a comparison between two parameters, a parameter and a value, or two values.
-    \item Negations and compositions are the traditional predicate logic building blocks.
-    \item We introduce a specific operator, ``impulse'', which allows to decide whether a message was received in a given time span.
+    \item Negations and compositions are the traditional propositional calculus building blocks.
+    \item We introduce a specific operator, ``impulse'', which allows to decide whether a message was received for a given variable.
 \end{itemize}
 
 \subsubsection{Temporal processes}
@@ -339,10 +349,18 @@ A duration is defined as a positive integer.
 An interval is at its core a set of durations: a min, an optional max, and the current position. 
 The lack of max means infinity.
 An interval is said to be fixed when its min equals its max. It may be enabled or disabled.
-\begin{align*}
-\mathbf{Status} &= \mathrm{Waiting} \mid \mathrm{Pending} \mid \mathrm{Happened} \mid \mathrm{Disposed} \\
-\mathbf{Interval} &= \mathrm{Duration} \times \mathrm{Maybe} ~\mathrm{Duration} \times \mathrm{Duration} \times \mathrm{Status}
-\end{align*}
+
+\begin{lstlisting}
+type interval = {
+  itvId: intervalId;
+  itvNode: nodeId;
+  minDuration: duration;
+  maxDuration : duration option;
+  nominalDuration : duration;
+  speed: float;
+  processes: process list
+}
+\end{lstlisting}
 
 The time scale is not specified by the system: for instance, when working with audio data it may be better to use the audio sample as a base unit of time.
 But many applications don't use the audio rate: when working purely with visuals it may be better to use the screen refresh rate as time base in order not to 
@@ -351,10 +369,14 @@ waste computer resources and energy.
 \subsubsection{Instantaneous condition}
 Then, we want to be able to enable or disable events and intervals according to a condition, given in the expression language seen in \ref{sec.temporal.conditions}. An instantaneous condition is defined as follows: 
 
-\[
-\mathbf{Condition} = \mathrm{Expression} \times \mathrm{Interval}[] \times \mathrm{Interval}[] \times \mathrm{Status}
-\]
-
+\begin{lstlisting}
+type condition = {
+  icId: instCondId;
+  condExpr: expression;
+  previousItv: intervalId list;
+  nextItv: intervalId list;
+}
+\end{lstlisting}
 It is preceded and followed by a set of intervals.
 
 Expressions are disabled either when they are false or when they are preceded by a non-null number of intervals, all of them already disabled through other conditions. This propagates recursiveley to the following intervals and conditions. 
@@ -364,123 +386,288 @@ A temporal condition is used to synchronize starts and ends of intervals, while 
 
 Temporal conditions carry instantaneous conditions, which will be evaluated at the moment where the temporal condition becomes true.
 
-\paragraph{A note on asynchronicity}
-We consider here a synchronous version of the temporal conditions, which assumes that external values would not variate at a greater rate than the tick rate of the system; in practice this is generally not the case. Hence, the actual implementation of temporal conditions supports asynchronous updates of the condition value according to received network messages rather than the tick rate. 
-This means that the execution will not miss cases where a condition would become false, true, then false again after the beginning and before the end of a tick.
+%\paragraph{A note on asynchronicity}
+%We consider here a synchronous version of the temporal conditions, which assumes that external values would not variate at a greater rate than the tick rate of the system; in practice this is generally not the case. Hence, the actual implementation of temporal conditions supports asynchronous updates of the condition value according to received network messages rather than the tick rate. 
+%This means that the execution will not miss cases where a condition would become false, true, then false again after the beginning and before the end of a tick.
 
-\subsubsection{Operations}
 \begin{lstlisting}
-
-\end{lstlisting}
-% TODO ici on push en front, tandis qu'en C++ on push en back
-\begin{lstlisting}
-add_process interval proc: interval * proc -> interval
- (t1, t2, p, t3) -> (t1, t2, proc::p, t3)
+type temporalCondition = {
+  tcId: tempCondId;
+  syncExpr: expression;
+  conds: condition list
+}
 \end{lstlisting}
 
+\subsubsection{Execution}
+Execution operates as follows: 
+
 \begin{lstlisting}
-add_event tc ic: TemporalCond * InstCond -> TemporalCond
- (..., ics, ...) -> (..., ic::ics, ...)
-\end{lstlisting}
-
-exécution : 
-
-interval: 
-
-On retourne une fonction ... \lstinline|graph_fun| va être appliquée au graph. Faut-il avoir une liste explicite ou bien juste passer le graph et demander à chaque fonction d'appliquer ses fonctions enfants ? Le second fait plus fonctionnel mais le premier laisse moins de marge d'erreur (DRY)
-\begin{lstlisting}
-get_node graph node_id -> node
-update_node graph node_id node -> graph
-
-graph_fun: graph -> graph ; va transformer un noeud du graphe d'une maniere donnee
-
-tuple_first tpls: retourne les premiers elements d'une liste de paires
-tuple_second tpls: retourne les premiers elements d'une liste de paires
-
-tick: itv, count, offset : interval * duration * duration -> interval * graph_fun[]
-  ((..., nom, t, pos, procs), new_date) -> (
-  let procs = map procs (state _ t offset) in 
-    (..., t + count, t + count / nom, tuple_first procs ),  
-    fun (node_date,node_offset) -> (t+count, offset) :: tuple_second procs)
+let tick_interval (itv:interval) t offset (state:score_state) =
+  let cur_date = (get_date itv state.itv_dates) in
+  let new_date = (cur_date + (truncate (ceil (float t) *. itv.speed))) in
+  let new_pos = (float new_date /. float itv.nominalDuration) in
+  let tp = tick_process cur_date new_date new_pos offset in
+  let rec exec_processes procs funs state =
+    match procs with
+    | [] -> (funs, state)
+    | proc::t -> let (nf, ns) = tp state proc in
+                 exec_processes t (funs@[nf]) ns
+  in
+  let (funs, state) = exec_processes itv.processes [] state in
+  ({ state with itv_dates = (set_date itv new_date state.itv_dates) },
+   (funs @ [ add_tick_to_node itv.itvNode (make_token new_date new_pos offset) ]))
 
 \end{lstlisting}
 
 processes:
 \begin{lstlisting}
-  state: process * t -> process * graph_fun
-  
-  described for each process (polymorphic)
+let tick_process cur_date new_date new_pos offset state p  =
+   match p.impl with
+    | Scenario s -> tick_scenario p.procId s cur_date new_date new_pos offset state
+    | Loop l -> tick_loop l cur_date new_date new_pos offset state
+    | DefaultProcess -> (add_tick_to_node p.procNode (make_token new_date new_pos offset), state)
+
 \end{lstlisting}
 
 \subsection{Temporal graph: scenario}\label{sec.scenario}
+Execution of a TC
+\begin{lstlisting}
+
+and scenario_process_TC scenario tc (state:score_state) =
+  let minDurReached ic (state:score_state) =
+    ...
+  in
+  let maxDurReached ic (state:score_state) =
+    ...
+  in
+
+  let execute_ic scenario (state:score_state) ic =
+    ...
+  in
+  let execute_tc scenario tc (state:score_state) =
+    let rec execute_all_ics ics (state:score_state) started_itvs ended_itvs happened_ics =
+      match ics with
+      | [] -> (state, started_itvs, ended_itvs, happened_ics)
+      | cond::t -> let (newStatus, started, stopped) = execute_ic scenario state cond in
+                   execute_all_ics
+                    t
+                    (* update the statuses of the ICs with new values *)
+                    { state with ic_statuses = (list_assoc_replace state.ic_statuses cond.icId newStatus) }
+                    (started@started_itvs)
+                    (stopped@ended_itvs)
+                    (if newStatus = Happened then cond::happened_ics else happened_ics)
+    in
+    let (state, started_itv_ids, ended_itv_ids, happened_ics) = execute_all_ics tc.conds state [] [] [] in
+
+    let rec start_all_intervals itvs (state:score_state) funs = 
+      ...
+    in
+    let (state, funs) =
+        start_all_intervals (get_intervals started_itv_ids scenario) state [] in
+
+    (state, List.flatten funs, happened_ics)
+  in
 
 
-\subsubsection{Creational operations}
+  let rec mark_IC_min conds state =
+    ..
+  in
+  let state = mark_IC_min tc.conds state in
 
-\begin{lstlisting}
-add_interval sc itv sev eev
-\end{lstlisting}
-\begin{lstlisting}
-add_sync sc
-\end{lstlisting}
-\subsubsection{Execution operations}
+  let tcMaxDurReached =
+    List.exists
+      (fun ic -> ((List.assoc ic.icId state.ic_statuses) = Pending) && (maxDurReached ic state))
+      tc.conds
+  in
 
-\begin{lstlisting}
-process_event:
-\end{lstlisting}
-\begin{lstlisting}
-make_happen:
-\end{lstlisting}
-\begin{lstlisting}
-make_dispose:
+  let is_pending_or_disposed ic =
+    let cur_st = (List.assoc ic.icId state.ic_statuses) in
+    cur_st = Pending || cur_st = Disposed
+  in
+  
+  if (not (List.for_all is_pending_or_disposed tc.conds))
+  then
+    ((state, [ ], [ ]), false)
+  else
+    if ((tc.syncExpr <> true_expression) && (not tcMaxDurReached))
+    then
+      let state = { state with listeners = register_listeners tc.syncExpr state.listeners } in
+      if (not (evaluate tc.syncExpr state.scoreEnv state.listeners))
+      then      
+        ((state, [ ], [ ]), false)
+      else
+        let state = { state with listeners = unregister_listeners tc.syncExpr state.listeners } in        
+        (execute_tc scenario tc state, true)
+    else    
+     (execute_tc scenario tc state, true)
+
 \end{lstlisting}
 
+Scenario tick 
 \begin{lstlisting}
-scenario_state : scenario -> scenario * state
+let tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
+  let dur = newdate - olddate in
+  let rec process_root_tempConds scenario tc_list state funs =
+     ...
+  in
+
+  let rec process_tempConds scenario tc_list (state:score_state) funs happened_ics =
+     ...
+  in
+
+  let rec process_intervals scenario itv_list overticks funs dur offset end_TCs state =
+     ...
+  in
+  
+  let (state, funcs) =
+    process_root_tempConds
+        scenario
+        (get_rootTempConds pid scenario state)
+        state [] in
+
+  let running_intervals = (List.filter (is_interval_running scenario state.ic_statuses) scenario.intervals) in
+  let (state, overticks, end_TCs, funcs) =
+    process_intervals scenario running_intervals [] funcs dur offset [] state in
+  let (state, funcs, conds) = process_tempConds scenario end_TCs state funcs [] in
+
+  let rec finish_tick scenario overticks conds funcs dur offset end_TCs state =
+    match conds with
+    | [ ] ->
+      (match end_TCs with
+       | [ ] -> (state, funcs)
+       | _ -> let (state, new_funs, conds) =
+                process_tempConds scenario end_TCs state [] [] in
+             finish_tick scenario overticks conds (funcs@new_funs) dur offset [ ] state)
+
+    | (cond:condition) :: remaining ->
+      match (List.assoc_opt (find_parent_TC cond scenario).tcId overticks) with
+      | None -> finish_tick scenario overticks remaining funcs dur offset end_TCs state
+      | Some (min_t, max_t) ->
+         let (state, overticks, end_TCs, funcs) =
+             process_intervals
+                scenario
+                (following_intervals cond scenario)
+                overticks funcs
+                max_t
+                (offset + dur - max_t)
+                end_TCs
+                state
+         in
+         finish_tick scenario overticks remaining funcs dur offset end_TCs state
+  in
+  
+  let (state, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs state in
+  (list_fun_combine funcs, state)
+;;
 \end{lstlisting}
 
 \subsection{Loop}\label{sec.loop}
 Pbq: not introducing cycles in the temporal graph
-\begin{lstlisting}
-process_event:
-\end{lstlisting}
-\begin{lstlisting}
-make_happen:
-\end{lstlisting}
-\begin{lstlisting}
-make_dispose:
-\end{lstlisting}
-\begin{lstlisting}
-loop_state:
-\end{lstlisting}
+
 \section{Data model}\label{sec.datamodel}
 => set date
 => set offset pour offset audio (p-ê pas nécessaire si on fait comme LAStream)
 
 \section{Data graph}
-Questions: 
-* node ordering
-* port definitions
-
-\begin{lstlisting}
-
-\end{lstlisting}
 
 \subsection{Structures}
-
 \begin{lstlisting}
+type edgeId = EdgeId of int;;
+type nodeId = NodeId of int;;
+type portId = PortId of int;;
+type edgeType =
+    Glutton
+  | Strict
+  | DelayedGlutton of value list
+  | DelayedStrict of value list
+;;
+type edge = {
+    edgeId: edgeId;
+    source: portId;
+    sink: portId;
+    edgeType: edgeType;
+};;
+type port = {
+    portId: portId;
+    portAddr: string option;
+    portEdges: edgeId list;
+};;
+type token_request = {
+  token_date: duration;
+  position: position;
+  offset: duration;
+};;
+type dataNode =
+    Automation of automation
+  | Mapping of mapping
+  | Sound of sound
+  | Passthrough of passthrough;;
+type grNode = {
+    nodeId: nodeId;
+    data: dataNode;
+};;
+type graph = {
+    nodes: grNode list;
+    edges: edge list;
+};;
+type grNodeState = {
+  executed: bool;
+  prev_date: duration;
+  tokens: token_request list
+};;
+type graph_state = {
+    node_state: (nodeId * grNodeState) list;
+    port_state: (portId * value option) list
+};;
 \end{lstlisting}
+
+
 \subsection{Operations}
 Input mix on each port
 
 \begin{lstlisting}
-copy_from_global
-copy_from_local
-init_node
-teardown_node
+let init_port (p:port) g gs (e:environment) =
+  match p.portEdges with
+  | [] -> let pv = match p.portAddr with
+                | None -> None
+                | Some str -> Some (pull str e)
+                in
+         replace_value p gs pv         
+  | _ -> replace_value p gs (List.fold_left (aggregate_data g gs) None (get_edges p.portEdges g) )
+  ;;
 
+let init_node n g gs (e:environment) =
+  match n.data with
+    | Automation (op, curve)  -> clear_port op gs;
+    | Mapping (ip, op, curve) -> let gs = clear_port op gs in
+                                 init_port ip g gs e
+    | Sound (op, audio)       -> clear_port op gs;
+    | Passthrough (ip, op)    -> let gs = clear_port op gs in
+                                 init_port ip g gs e
+;;
 
-\end{lstlisting} 
+let write_port p (g:graph) (gs:graph_state) (e:environment) =
+  let has_targets = (p.portEdges = []) in
+  let all_targets_disabled =
+    has_targets &&
+    List.for_all (fun x -> in_port_disabled x g gs) p.portEdges in
+  if(not has_targets || all_targets_disabled) then
+    (gs, write_port_env p gs e)
+  else
+    (write_port_edges p gs, e)
+;;
+
+let teardown_node n g gs e =
+  match n.data with
+  | Automation (op, _)      -> write_port op g gs e;
+  | Sound (op, _)           -> write_port op g gs e;
+  | Mapping (ip, op, curve) -> let (gs, e) = write_port op g gs e in
+                               (clear_port ip gs, e);
+  | Passthrough (ip, op)    -> let (gs, e) = write_port op g gs e in
+                               (clear_port ip gs, e);
+;;
+\end{lstlisting}
+
 
 
 \subsection{Tick description}
@@ -498,90 +685,63 @@ priority:
 do a tick: 
 
 \begin{lstlisting}
-let clear_outputs n = 
-  (_, ..., (map n.outputs (match p with 
-  | value -> clear value
-  | audio -> clear audio
-))
 
-let pull_port p : port -> port 
-
-init_value : port -> value
-let init_value value_port = 
-  if !empty value_port.cables
-    mix (pull_port value_port.cables)
-  pull value_port.address
-
-
-let init_node g n = 
-  (_, (map n.inputs (match p with 
-    | value -> pull value
-  )), ...) 
-exec_node: 
-   in
-  let copy_inputs n = 
-  let init_node n = 
-    copy_inputs clear_outputs n      
-  in 
-  
-  new_node, new_local_state = exec_node init_node n
-  replace g n new_node 
-    
-tick_graph: 
-  while: ! empty nodes 
-  
+let rec sub_tick graph gs nodes (e:environment) =
+ match nodes with
+ | [ ] -> (gs, e);
+ | _ ->
+   let next_nodes = List.filter can_execute nodes in
+   let next_nodes = List.sort (nodes_sort next_nodes) next_nodes in
+   match next_nodes with
+   | [ ] -> (gs, e) ;
+   | cur_node::q ->	
+     let gs = init_node cur_node graph gs e in
+     let rec run_ticks_for_node g gs n tokens =
+       match tokens with
+       | [] -> gs
+       | token::t -> let gs = exec_node g gs n (List.assoc n.nodeId gs.node_state) token
+                     in run_ticks_for_node g gs n t
+     in
+     let gs = run_ticks_for_node graph gs cur_node 
+     				(List.assoc cur_node.nodeId gs.node_state).tokens in
+     let (gs, e) = teardown_node cur_node graph gs e in
+ 
+     sub_tick graph gs (remove_node next_nodes cur_node.nodeId) e;;
 \end{lstlisting}
 
 
-
 \subsection{Data nodes}
+Say that in the C++ code, the port kinds are statically checked : no way to mistake input from output.
+\begin{lstlisting}
+type curve = float -> float;;
+type automation = port * curve;;
+type mapping = port * port * curve;;
+type sound = port * float array array;;
+type passthrough = port * port;;
+\end{lstlisting}
 \subsubsection{Passthrough}
 -> used for scenario and interval
 -> mixing at the input
 
-
-\subsubsection{Automation}
-\paragraph{Curves}
+\begin{itemize}
+\item Automation: 
 start point + set of (segment * breakpoint)
 
 curve + message output port
 $x\in[0;1]$ -> in the nominal duration of the parent time interval.
 
-\begin{lstlisting}
-state_autom :
-\end{lstlisting}
-\subsubsection{Mapping}
-message input port + curve + message output port
-\begin{lstlisting}
-state_mapping :
-\end{lstlisting}
-\subsubsection{JavaScript}
-n message input port + curve + n message output port
-\begin{lstlisting}
-state_js :
-\end{lstlisting}
-\subsubsection{Piano Roll}
-notes + midi output port
-\begin{lstlisting}
-state_midi :
-\end{lstlisting}
-\subsubsection{Sound file}
-sound data + midi output port
-\begin{lstlisting}
-state_sndfile :
-\end{lstlisting}
-\subsubsection{Buffer}
-Used to keep audio input in memory
-
+\item Mapping: message input port + curve + message output port
+\item Javascript:  n message input port + curve + n message output port
+\item Piano roll:  notes + midi output port
+\item Sound file: sound data + midi output port
+\item Passthrough:
+\item Buffer: Used to keep audio input in memory
+\item Metronome: 
+\item Constant: writes a value at each tick
 Why isn't the delay cable not enough ? can't go backwards. 
 pb: pauser au milieu: coupure. cas dans les boucles: on réécrit par dessus (buffer vidé sur start).
-\begin{lstlisting}
-state_buffer :
-\end{lstlisting}
-%\subsubsection{Shader}
-%\subsubsection{3D model}
-%gltf ? 
-
+\item Shader
+\end{itemize}
 \section{Combined model}
 -> on ajoute node aux tc
 
@@ -589,19 +749,151 @@ state_buffer :
 
 -> offset nécessaire pour tc pour gérer l'audio (mais pourrait être ajouté dans le modèle de base. Ou bien passer une paire de pointeurs.. ? )
 
-\subsection{Combined tick}
+\subsection{Combined tick and general flow}
 Exécution complète d'un tick: 
-Copy audio buffers and input data, execute the temporal tick, execute the graph tick, copy the output audio buffer and apply the produced state by pushing the values.
+Copy audio buffers and input data, execute the temporal tick, apply the function to the graph state, execute the graph tick, copy the output audio buffer and apply the produced state by pushing the values.
+
 
 Pour être propre, il faudrait faire un "pull" général au début...
+
+\begin{lstlisting}
+let add_tick_to_node nodeId token (gs:graph_state) =
+  let cur_state = (find_node_state gs nodeId) in
+  replace_node_state gs nodeId { cur_state with
+      tokens = cur_state.tokens @ [ token ];
+  }
+;;
+\end{lstlisting}
+
+Multiple possibilities for a tradeoff between accuracy and performance: 
+\begin{itemize}
+	\item Use the requested ticks. This allows to have a better the performance - latency ratio at the expense of sample-accuracy for the control data.
+	\item Use the requested ticks and tick all the nodes at the smallest granularity: 
+	given two nodes A, B, with tokens at $t=10$, $t=25$ for A and $t=17$ for B, tick all the nodes at 10, 17, 25.
+	\item Maximal accuracy : tick with a granularity of one sample every time.
+\end{itemize}
+
+
+
+\begin{lstlisting}
+let main_loop root graph duration granularity 
+			  (state:score_state) ext_events ext_modifications =
+ let total_dur = duration in
+ let rec main_loop_rec root graph
+                       remaining old_remaining granularity
+                       (state:score_state) (gs:graph_state) funs =
+   if remaining > 0
+   then
+     (
+     let elapsed = total_dur - remaining in
+     let old_elapsed = total_dur - old_remaining in
+     let (root,graph,state) = 
+     	ext_modifications root graph state old_elapsed elapsed  in
+     let (state, new_funs)  = 
+     	tick_interval root granularity 0 state in
+     let gs = add_missing graph gs in
+     let (gs, e)            = 
+     	tick_graph_topo graph (update_graph (funs@new_funs) gs) state.scoreEnv in
+     let state = 
+     { state with
+       scoreEnv = 
+         (update (commit e) ext_events old_elapsed elapsed);
+       listeners = 
+         (update_listeners state.listeners e.local ext_events old_elapsed elapsed)
+     } in
+     main_loop_rec root graph (remaining - granularity) old_remaining
+         granularity state gs []
+     )
+   else
+     (root, graph, state)
+ in
+ let (state, funs) = start_interval root state in
+ let gs = { node_state = [] ; port_state = [] } in
+ main_loop_rec root graph duration duration granularity state gs funs
+;;
+
+\end{lstlisting}
+
+
+\section{Audio behaviour}
+
 \begin{figure}
-	\caption{General data flow for a tick}
+\centering
+\begin{tikzpicture}[scale=0.8]
+  \tikzstyle{event}=[circle,thick,fill=black];
+  
+    
+  \draw [dashed, line width = 1.5, opacity=0.3] (0, 9) -- (0, 6) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (7, 9) -- (7, 6) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (13, 11) -- (13, 6) ;
+  \draw [line width = 1.5, opacity=1] (0, 11) -- (0, 9) ;
+    
+  \coordinate (astart) at (0, 11);
+  \coordinate (aend) at (13, 11);
+  \draw [line width=2] (astart) -- (aend) node[midway,below,yshift=-3mm] {Automation curve};
+  \node[event] at (astart) {};
+  \node[event] at (aend) {};
+  
+  \coordinate (cstart) at (0, 9);
+  \coordinate (cmid) at (7, 9);  
+  \coordinate (cend) at (15, 9);    
+  \draw [line width=2] (cstart) -- (cmid) node[midway,below,yshift=-3mm] {Sound 1};
+  \draw [line width=2] (cmid) -- (cend) node[midway,below,yshift=-3mm] {Sound 2};
+  \node[event] at (cstart) {};
+  \node[event] at (cmid) {};
+  \node[event] at (cend) {};
+  
+  
+  % samples
+  \foreach \x in {0,...,14}
+    \draw [](0.1+\x, 7cm) -- (0.1+\x,6cm) -- (0.9+\x, 6cm) -- (0.9+\x,7cm);
+  
+  
+  % ticks
+  \foreach \x in {0,5,...,15}
+    \draw [line width=1.5](\x, 5.9cm) -- (\x, 6.5cm) node[] {};
+  \draw [line width=1.5](0, 5.9cm) -- (15, 5.9cm);
+  
+  
+    % samples
+    \foreach \x in {0,...,14}
+      \draw [](0.1+\x, 5cm) -- (0.1+\x,4cm) -- (0.9+\x, 4cm) -- (0.9+\x,5cm);
+    
+    
+    % ticks
+    \foreach \x in {0,5,...,15}
+      \draw [line width=1.5](\x, 3.9cm) -- (\x, 4.5cm) node[] {};
+    \draw [line width=1.5](0, 3.9cm) -- (15, 3.9cm);
+    
+\end{tikzpicture}
+\caption{A scenario. The small bins represent individual audio samples ; the bigger bins represent the tick rate of the sound card. For the sake of the example, one can assume that the automation curve is used to control the output volume of the englobing scenario, not represented here.}
+\label{fig.scenarautom}
 \end{figure}
+
+\begin{table}
+\centering
+\begin{tabular}{c|c|c|c|c}
+ & Tick 0 & Tick 1 & Tick 2 & Tick 3 \\ 
+\hline 
+\textbf{Automation} & $(0, 0, 0)$ &  &  &  \\ 
+\textbf{Sound 1} & $(0, 0, 0)$ & $(0, 5, 0)$ & $(5, 7, 0)$ &  \\ 
+\textbf{Sound 2} &  &  & $(0, 3, 2)$ & $(3, 8, 0)$ \\ 
+\textbf{Scenario} & $(0, 0, 0)$ & $(0, 5, 0)$ & $(5, 10, 0)$ & $(10, 15, 0)$ \\ 
+\end{tabular} 
+\caption{Value of token requests for the scenario ~\ref{fig.scenarautom}. In each cell, $(a,b,c)$ stands for previous date, current date, offset.}
+\end{table}
+
+Expliquer tick avec données, offset, etc.
+
+Cas complexe: 
+
+dernier tick d'une boucle qui a un enfant fichier son + automation
 
 \section{Proposed sequencer behaviour}
 Conditions et cie: The most common case for an expression is to be true.
 
-UI: création automatique de liens implicites des enfants vers les parents
+UI: création automatique de liens implicites des enfants vers les parents si demandé (propriété de l'ui "propagate").
+N'a de sens que pour l'audio de par la nature homogène de ces flux.
 => "cable créé par défaut" quand on rajoute un processus dont on marque l'entrée
 
 => pour toute contrainte, pour tout scénario, créer noeud qui fait le mixage
@@ -621,9 +913,15 @@ Choix pour multicanal: faire comme jamoma avec objets tilde
 
 
 - Dire qu'on pourrait affiner en combinant plus précisément les "sous-ticks" temporels et de données
-pour que par exemple la production d'un état dans un scénario entraîne une condition dans un autre scénario
+pour que par exemple la production d'un état dans un scénario entraîne une condition dans un autre scénario -> tout réduire à un tick
 
 
+\section{Mapping from visual language}
+All the objects in the visual language correspond to the objects presented earlier, at the exception of the states.
+
+States : intervals with a duration equal to zero.
+IC / TC / interval / processes : no change
+edges : between processes
 \section{Applications and examples}
 
 \subsection{Reconstructing existing paradigms}
@@ -660,7 +958,7 @@ Midi tracks are built with :
 This can easily be extended with further features: sends, automations, etc.
 \subsubsection{Looping audio sequencer}
 More recently, a different kind of sequencer has emerged: the looping, non-linear sequencer. 
-The prime exemple of this is Ableton Live. We give the example for a simplified model of live-looping without quantization.
+The prime example of this is Ableton Live. We give the example for a simplified model of live-looping without quantization.
 
 These sequencers are also organized in tracks ; however, within a track, the musician can choose a single loop 
 that is currently playing, and regularly switch the current loop.

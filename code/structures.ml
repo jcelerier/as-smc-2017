@@ -234,16 +234,12 @@ type token_request = {
   token_date: duration;
   position: position;
   offset: duration;
-  start_discontinuous: bool;
-  end_discontinuous: bool;
 };;
 
 let make_token dur pos off =
   { token_date = dur;
     position = pos;
     offset = off;
-    start_discontinuous = false;
-    end_discontinuous = false;
   };;
 
 (* nodes of the data graph *)
@@ -977,10 +973,8 @@ and tick_interval (itv:interval) t offset (state:score_state) =
   let (funs, state) = exec_processes itv.processes [] state in
 
   (* execute the interval itself *)
-  (
-   { state with itv_dates = (set_date itv new_date state.itv_dates) },
-   (funs @ [ add_tick_to_node itv.itvNode (make_token new_date new_pos offset) ])
-  )
+  ({ state with itv_dates = (set_date itv new_date state.itv_dates) },
+   (funs @ [ add_tick_to_node itv.itvNode (make_token new_date new_pos offset) ]))
 
 
 and start_interval itv (state:score_state) =
@@ -1065,7 +1059,7 @@ and scenario_process_TC scenario tc (state:score_state) =
 
   (* execution of a given instantaneous condition *)
   (* returns (ic, started intervals, stopped intervals *)
-  let execute_ic scenario (state:score_state) ic =
+  let execute_ic (state:score_state) ic =
     if evaluate ic.condExpr state.scoreEnv state.listeners
     then
       scenario_ic_happen scenario ic
@@ -1074,13 +1068,12 @@ and scenario_process_TC scenario tc (state:score_state) =
   in
 
   (* execution of a given temporal condition *)
-  (* returns (new_scenario, [ instantaneous conditions that executed ], [ functions to apply to the data graph ]) *)
-  let execute_tc scenario tc (state:score_state) =
+  let execute_tc tc (state:score_state) =
     (* execute the conditions *)
     let rec execute_all_ics ics (state:score_state) started_itvs ended_itvs happened_ics =
       match ics with
       | [] -> (state, started_itvs, ended_itvs, happened_ics)
-      | cond::t -> let (newStatus, started, stopped) = execute_ic scenario state cond in
+      | cond::t -> let (newStatus, started, stopped) = execute_ic state cond in
                    execute_all_ics
                     t
                     (* update the statuses of the ICs with new values *)
@@ -1151,10 +1144,10 @@ and scenario_process_TC scenario tc (state:score_state) =
       else
         let state = { state with listeners = unregister_listeners tc.syncExpr state.listeners } in
         (* the tc expression is true, we can proceed with the execution of what follows *)
-        (execute_tc scenario tc state, true)
+        (execute_tc tc state, true)
     else
      (* max reached or true expression, we can execute the temporal condition  *)
-     (execute_tc scenario tc state, true)
+     (execute_tc tc state, true)
 
 
 and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
@@ -1162,7 +1155,7 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
   (* execute the list of root TCs.
      l1 : list of executed ICs
      l2 : list of resulting functions  *)
-  let rec process_root_tempConds scenario tc_list state funs =
+  let rec process_root_tempConds tc_list state funs =
     match tc_list with
     | [ ] -> (state, funs)
     | h::t ->
@@ -1172,29 +1165,29 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
 
         if (not executed) then
           (* The trigger wasn't executed, we keep it *)
-          process_root_tempConds scenario t state (funs@new_funs)
+          process_root_tempConds t state (funs@new_funs)
         else
           (* the TC was executed, remove it from the roots *)
           let cur_rootTCs = List.filter (fun x -> x <> h.tcId) (List.assoc pid state.rootTCs) in
           process_root_tempConds
-            scenario t
+            t
             { state with rootTCs = list_assoc_replace state.rootTCs pid cur_rootTCs }
             (funs@new_funs)
   in
 
   (* execute a given list of TCs *)
-  let rec process_tempConds scenario tc_list (state:score_state) funs happened_ics =
+  let rec process_tempConds tc_list (state:score_state) funs happened_ics =
     match tc_list with
     | [ ] -> (state, funs, happened_ics)
     | h::t ->
         (* try to execute the TC *)
         let ((state, new_funs, new_hics), _) =
             scenario_process_TC scenario h state in
-        process_tempConds scenario t state (funs@new_funs) (new_hics@happened_ics)
+        process_tempConds t state (funs@new_funs) (new_hics@happened_ics)
   in
 
   (* execute a list of intervals *)
-  let rec process_intervals scenario itv_list overticks funs dur offset end_TCs (state:score_state) =
+  let rec process_intervals itv_list overticks funs dur offset end_TCs (state:score_state) =
     match itv_list with
     | [ ] -> (state, overticks, end_TCs, funs)
     | interval::tail ->
@@ -1202,7 +1195,6 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
         let ((state, new_funs), overticks) =
             scenario_run_interval scenario overticks dur offset interval state in
         process_intervals
-         scenario
          tail overticks
          (funs@new_funs)
          dur offset
@@ -1210,7 +1202,7 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
          state
   in
 
-  let rec finish_tick scenario overticks conds funcs dur offset end_TCs state =
+  let rec finish_tick overticks conds funcs dur offset end_TCs state =
     match conds with
     | [ ] ->
       (* now we can process remaining end_TCs *)
@@ -1219,18 +1211,17 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
        | [ ] -> (state, funcs)
        (* some TCs reached their end so we execute them *)
        | _ -> let (state, new_funs, conds) =
-                process_tempConds scenario end_TCs state [] [] in
-             finish_tick scenario overticks conds (funcs@new_funs) dur offset [ ] state)
+                process_tempConds end_TCs state [] [] in
+             finish_tick overticks conds (funcs@new_funs) dur offset [ ] state)
 
     | (cond:condition) :: remaining ->
       (* look if an over-tick was recorded for the TC *)
       match (List.assoc_opt (find_parent_TC cond scenario).tcId overticks) with
-      | None -> finish_tick scenario overticks remaining funcs dur offset end_TCs state
+      | None -> finish_tick overticks remaining funcs dur offset end_TCs state
       | Some (min_t, max_t) ->
          (* we can go forward with executing some intervals *)
          let (state, overticks, end_TCs, funcs) =
              process_intervals
-                scenario
                 (following_intervals cond scenario)
                 overticks funcs
                 max_t
@@ -1238,28 +1229,25 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
                 end_TCs
                 state
          in
-         finish_tick scenario overticks remaining funcs dur offset end_TCs state
+         finish_tick overticks remaining funcs dur offset end_TCs state
   in
 
   (*** actual execution begins here ***)
 
   (* first execute the root temporal conditions, if any *)
   let (state, funcs) =
-    process_root_tempConds
-        scenario
-        (get_rootTempConds pid scenario state)
-        state [] in
+    process_root_tempConds (get_rootTempConds pid scenario state) state [] in
 
   (* run the intervals that follows them *)
   let running_intervals = (List.filter (is_interval_running scenario state.ic_statuses) scenario.intervals) in
   let (state, overticks, end_TCs, funcs) =
-    process_intervals scenario running_intervals [] funcs dur offset [] state in
+    process_intervals running_intervals [] funcs dur offset [] state in
 
   (* run potential terminating temporal conditions *)
-  let (state, funcs, conds) = process_tempConds scenario end_TCs state funcs [] in
+  let (state, funcs, conds) = process_tempConds end_TCs state funcs [] in
 
   (* loop until the time cannot be advanced in any branch anymore *)
-  let (state, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs state in
+  let (state, funcs) = finish_tick overticks conds funcs dur offset end_TCs state in
   (list_fun_combine funcs, state)
 ;;
 
