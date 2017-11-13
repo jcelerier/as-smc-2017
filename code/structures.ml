@@ -781,10 +781,14 @@ and loop = {
 
 (* listeners *)
 let register_listener (id, var) lst =
-    let new_l = {
-        exprAddr = var;
-        exprSet = false
-    } in list_assoc_replace lst id new_l
+    if List.mem_assoc id lst
+    then
+        lst
+    else
+        let new_l = {
+            exprAddr = var;
+            exprSet = false
+        } in list_assoc_replace lst id new_l
 ;;
 
 let register_listeners (expr:expression) lst =
