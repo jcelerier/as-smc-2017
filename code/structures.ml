@@ -703,6 +703,7 @@ type tempCondId = TempCondId of int;;
 type instCondId = InstCondId of int;;
 type processId = ProcessId of int;;
 
+exception WrongProcess;;
 type score_state =
 {
  itv_dates: (intervalId * duration) list;
@@ -743,6 +744,9 @@ and process = {
   procId: processId;
   procNode: nodeId;
   impl: processImpl;
+  start: process -> score_state -> score_state;
+  stop: process -> score_state -> score_state;
+  tick: process -> duration -> duration -> position -> duration -> score_state -> ((graph_state -> graph_state) * score_state)
 }
 and interval = {
   itvId: intervalId;
@@ -767,7 +771,6 @@ and temporalCondition = {
 and scenario = {
   intervals: interval list ;
   tempConds: temporalCondition list;
-  (* tick: duration -> position -> scenario; *)
 }
 and loop = {
   pattern: interval;
@@ -894,70 +897,38 @@ let is_interval_running scenario ic_status itv =
 (* These functions tick the temporal graph. They produce a pair :
    (new object, function to call on the data graph)
 *)
-let rec tick_loop s cur_d new_d p o (state:score_state) =
-  (graph_ident, state)
 
+let is_root tc =
+  (tc.syncExpr = true_expression)
+  &&
+  (List.for_all (fun c -> c.previousItv = [ ]) tc.conds)
+;;
   (* actions & triggerings might happen on start / stop *)
   (* starting of processes *)
 
   (* when a scenario starts, we look up all the "root" temporal conditions :
      they are not preceded by any interval and start on the condition "true" *)
-and is_root tc =
-  (tc.syncExpr = true_expression)
-  &&
-  (List.for_all (fun c -> c.previousItv = [ ]) tc.conds)
-
-and start_scenario (s:scenario) (p:processId) (state:score_state) =
-   { state with
-     (* find all root TCs *)
-     rootTCs = list_assoc_replace
-                 state.rootTCs
-                 p
-                 (List.map (fun x -> x.tcId) (List.filter is_root s.tempConds));
-     (* set the date of every interval to 0 *)
-     itv_dates = list_assoc_merge state.itv_dates (List.map (fun x -> (x.itvId, 0)) s.intervals);
-     (* set all ICs as waiting *)
-     ic_statuses = list_assoc_merge state.ic_statuses (List.map (fun x -> (x.icId, Waiting)) (get_all_ICs s))
-   }
-
-and start_loop l state =
-  state;
 
 (*
 For processes, add a first tick at t=0 when starting them.
 No samples will be produced so the offset does not matter.
 *)
-and start_process p (state:score_state) =
-    (match p.impl with
-             | Scenario s -> start_scenario s p.procId state;
-             | Loop l -> start_loop l state;
-             | DefaultProcess -> state;
-    ,
+let start_process p (state:score_state) =
+    (p.start p state,
     add_tick_to_node p.procNode (make_token 0 0. 0)
-  );
+  )
+;;
 
-  (* stopping of processes *)
-and stop_scenario s (state:score_state) =
-  (state, graph_ident);
+let stop_process p (state:score_state) =
+    p.stop p state
+;;
+let tick_process cur_date new_date new_pos offset (state:score_state) p  =
+   p.tick p cur_date new_date new_pos offset state
+;;
 
-and stop_loop l (state:score_state) =
-  (state, graph_ident);
-
-and stop_process p (state:score_state) =
-  match p.impl with
-    | Scenario s -> stop_scenario s state;
-    | Loop l -> stop_loop l state;
-    | DefaultProcess -> (state, graph_ident);
-
-  (* ticking of processes: increase the time. *)
-and tick_process cur_date new_date new_pos offset (state:score_state) p  =
-   match p.impl with
-    | Scenario s -> tick_scenario p.procId s cur_date new_date new_pos offset state
-    | Loop l -> tick_loop l cur_date new_date new_pos offset state
-    | DefaultProcess -> (add_tick_to_node p.procNode (make_token new_date new_pos offset), state)
 
   (* ticking of intervals: aggregate all the ticks of the processes *)
-and tick_interval (itv:interval) t offset (state:score_state) =
+let tick_interval (itv:interval) t offset (state:score_state) =
   let (cur_date:duration) = (get_date itv state.itv_dates) in
   let new_date = (cur_date + (truncate (ceil (float t) *. itv.speed))) in
   let new_pos = (float new_date /. float itv.nominalDuration) in
@@ -975,9 +946,9 @@ and tick_interval (itv:interval) t offset (state:score_state) =
   (* execute the interval itself *)
   ({ state with itv_dates = (set_date itv new_date state.itv_dates) },
    (funs @ [ add_tick_to_node itv.itvNode (make_token new_date new_pos offset) ]))
+;;
 
-
-and start_interval itv (state:score_state) =
+let start_interval itv (state:score_state) =
   let rec start_processes procs funs (state:score_state) =
     match procs with
     | [] -> (funs, (state:score_state))
@@ -989,11 +960,32 @@ and start_interval itv (state:score_state) =
   ({ state with itv_dates = list_assoc_replace state.itv_dates itv.itvId 0 },
    (funs @ [ add_tick_to_node itv.itvNode (make_token 0 0. 0) ])
   )
+;;
 
-and stop_interval itv = (*todo*)
+let stop_interval itv = (*todo*)
   itv
+;;
 
-and scenario_ic_happen scenario ic =
+
+(****************
+ * default proc *
+ ****************)
+
+let default_tick p oldd new_date new_pos offset state =
+  (add_tick_to_node p.procNode (make_token new_date new_pos offset), state)
+and default_start p state =
+  state
+and default_stop p state =
+  state
+;;
+
+
+(************
+ * scenario *
+ ************)
+
+(*** utilities ***)
+let rec scenario_ic_happen scenario ic =
   (* mark ic as executed, add previous intervals to stop set, next intervals to start set *)
   let started_set = ic.nextItv in
   let stopped_set = ic.previousItv in
@@ -1150,7 +1142,28 @@ and scenario_process_TC scenario tc (state:score_state) =
      (execute_tc tc state, true)
 
 
-and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
+(*** main functios ***)
+
+and start_scenario (proc:process) (state:score_state) =
+   let (s:scenario) = (match proc.impl with | Scenario s -> s | _ -> raise WrongProcess) in
+   { state with
+     (* find all root TCs *)
+     rootTCs = list_assoc_replace
+                 state.rootTCs
+                 proc.procId
+                 (List.map (fun x -> x.tcId) (List.filter is_root s.tempConds));
+     (* set the date of every interval to 0 *)
+     itv_dates = list_assoc_merge state.itv_dates (List.map (fun x -> (x.itvId, 0)) s.intervals);
+     (* set all ICs as waiting *)
+     ic_statuses = list_assoc_merge state.ic_statuses (List.map (fun x -> (x.icId, Waiting)) (get_all_ICs s))
+   }
+
+and stop_scenario s (state:score_state) =
+  state;
+
+and tick_scenario (p:process) olddate newdate pos offset (state:score_state) =
+  let pid = p.procId in
+  let scenario = match p.impl with | Scenario s -> s | _ -> raise WrongProcess in
   let dur = newdate - olddate in
   (* execute the list of root TCs.
      l1 : list of executed ICs
@@ -1251,6 +1264,16 @@ and tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
   (list_fun_combine funcs, state)
 ;;
 
+(*********
+ * loop *
+ ********)
+
+let tick_loop s cur_d new_d p o (state:score_state) =
+  (graph_ident, state)
+and start_loop l state =
+  state;
+and stop_loop l (state:score_state) =
+  state;;
 
 (*************
  * main loop *
@@ -1431,6 +1454,9 @@ let test_itv_1 = {
       procId = ProcessId 1;
       procNode = snd_node_1.nodeId;
       impl = DefaultProcess;
+      start = default_start;
+      stop = default_stop;
+      tick = default_tick;
     }
   ];
 } in
@@ -1457,6 +1483,9 @@ let test_itv_3 = {
       procId = ProcessId 2;
       procNode = snd_node_2.nodeId;
       impl = DefaultProcess;
+      tick = default_tick;
+      start = default_start;
+      stop = default_stop;
     }
   ];
 } in
@@ -1525,6 +1554,9 @@ let test_root = {
       procId = ProcessId 3;
       procNode = sc_node_1.nodeId;
       impl = test_scenario;
+      tick = tick_scenario;
+      start = start_scenario;
+      stop  = stop_scenario;
     }
   ]
 } in
