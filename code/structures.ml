@@ -881,6 +881,9 @@ let get_intervals id_list scenario =
 let get_temporalConds id_list scenario =
   List.filter (fun x -> List.mem x.tcId id_list) scenario.tempConds;;
 
+
+(* when a scenario starts, we look up all the "root" temporal conditions :
+   they are not preceded by any interval and start on the condition "true" *)
 let get_rootTempConds pid scenario state =
   let ids = List.assoc pid state.rootTCs in
   get_temporalConds ids scenario;;
@@ -903,11 +906,6 @@ let is_root tc =
   &&
   (List.for_all (fun c -> c.previousItv = [ ]) tc.conds)
 ;;
-  (* actions & triggerings might happen on start / stop *)
-  (* starting of processes *)
-
-  (* when a scenario starts, we look up all the "root" temporal conditions :
-     they are not preceded by any interval and start on the condition "true" *)
 
 (*
 For processes, add a first tick at t=0 when starting them.
@@ -985,6 +983,8 @@ and default_stop p state =
  ************)
 
 (*** utilities ***)
+
+
 let rec scenario_ic_happen scenario ic =
   (* mark ic as executed, add previous intervals to stop set, next intervals to start set *)
   let started_set = ic.nextItv in
@@ -1268,8 +1268,29 @@ and tick_scenario (p:process) olddate newdate pos offset (state:score_state) =
  * loop *
  ********)
 
-let tick_loop s cur_d new_d p o (state:score_state) =
-  (graph_ident, state)
+let tick_loop (p:process) olddate newdate pos offset (state:score_state)  =
+
+  let is_simple_loop loop =
+    loop.startTC.syncExpr = true_expression &&
+    loop.endTC.syncExpr = true_expression &&
+    (List.hd loop.startTC.conds).condExpr = true_expression &&
+    (List.hd loop.endTC.conds).condExpr = true_expression
+  in
+
+
+  let pid = p.procId in
+  let loop = match p.impl with | Loop l -> l | _ -> raise WrongProcess in
+  let tick_amount = newdate - olddate in
+  if is_simple_loop loop
+  then
+    let rec tick_simple tick_amount state =
+      if dur > 0 then
+        if (get_date loop.interval state) + tick_amount < i
+    in
+    tick_simple dur state
+  else
+    (graph_ident, state)
+
 and start_loop l state =
   state;
 and stop_loop l (state:score_state) =
