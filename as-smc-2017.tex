@@ -28,6 +28,7 @@
 \usepackage{tkz-graph}  
 \usepackage{subcaption}
 \usepackage{acronym}
+\usepackage{todonotes}
 \usetikzlibrary{shapes.geometric,positioning,fit,backgrounds}
 %=================================================================
 %% Please use the following mathematics environments: Theorem, Lemma, Corollary, Proposition, Characterization, Property, Problem, Example, ExamplesandDefinitions, Hypothesis, Remark, Definition
@@ -159,47 +160,33 @@ Then, we introduce implicit operations and defaults in the context of a GUI soft
 Real-world examples are provided and discussed.
 
 \cite{celerier2017icmc}
-\section{Orchestrated data}\label{sec.device}
-We first define the data we operate on.
-External devices are modeled as a tree of optional parameters.
 
-Value parameters can have values of common data types such as integer, float, etc.
-Audio parameters are arrays that contain either the current input audio buffers of the sound card or the buffers that will be written to the sound card's output.
+\section{Proposed sequencer behaviour}
+We give here an overview of the whole system ; the choices and ideas proposed will be explained in detail in the following sections.
 
-The tree of nodes is akin to the methods and containers described in the OSC specification.
+The overall goal is to associate traditional dataflow graphs with temporal semantics.
+In terms of model, two structures are present: the dataflow graph which will generate and process musical data, and the control graph which will specify when and how the dataflow graph runs.
 
-\begin{align*}
-\mathbf{Value} & = \mathrm{Float} \mid \mathrm{Int} \mid \mathrm{Bool} \mid \mathrm{String} \mid \dots \\
-\mathbf{ValueParameter} & = \mathrm{Value} \times \mathrm{Protocol} \\
-\mathbf{AudioParameter} & = \mathrm{Float[][]} \times \mathrm{Protocol} \\
-\mathbf{Parameter} & = \mathrm{ValueParameter} \mid \mathrm{AudioParameter} \\
-\mathbf{Node} & = \mathrm{String} \times \mathrm{Maybe}~\mathrm{Parameter} \times \mathrm{Node[]} 
-\end{align*}
+For the dataflow graph, the traditional musical programming patterns of \todo{cite control-signal separation} and \todo{cite audio processing in buffers} are used.
 
-Parameters and nodes bear additional metadata which is not relevant to describe here: textual description, tags, etc.
+The temporal graph allows three things :
+\begin{itemize}
+\item Embedding interaction choices in the time-line.
+\item Arbitrary hierarchy.
+\item Merging of loop-based and timeline-based control: we show in section\ref{sec.existingparadigms} that this is enough to allow both time-based and loop-based behaviors to co-exist in a single structure and user interface, unlike existing approaches which splits those in two mostly distinct domains ; this enables a large array of possible intermediary behaviors.
+\end{itemize} 
 
-The parameters's associated values match the state of an external device: synthesizer, etc.
-Multiple protocols are implemented to allow this: for instance OSC, MIDI, etc.
+Then, at each tick, the temporal graph runs as described in section~\ref{sec.temporal}. This produces tokens in the dataflow graph nodes. Once tokens have been produced for every temporal structure, the data graph runs.
 
-We define two core operations on parameters: 
-\begin{align*}
-\mathbf{pull} & : \mathrm{Parameter} \rightarrow \mathrm{Parameter} \\
-              & (v, p) \mapsto (v', p)~\text{where v' is the last known value in the remote device}\\
-\mathbf{push} &: \mathrm{Parameter} \times \mathrm{Value} \rightarrow \mathrm{Parameter} \\
-              & (v, p), v' \mapsto (v', p)~\text{and v' is sent to the remote device} 
-\end{align*}
+To accomodate for the tempoarl semantics, special connection types
 
-\section{Temporal model}
-The temporal model is twofold: it is a hierarchical tree of processes, whose durations and execution times are directed by intervals organized in a \ac{DAG}. 
-The beginning and end of the intervals is subjected to various conditions that will be presented ; these conditions allow for various 
-interactive behaviours. % TODO Processes are any kind of relevant artistic process: automations, notes sequences, sound files. 
-In particular, specific dispositions of intervals and conditions are implemented as processes themselves, scenario and loop, which allows for hierarchy.
 
-We note: $\tc$ for temporal conditions, $\ic$ for instantaneous conditions, $\itv$ for intervals, $\proc$ for processes. 
-First, these elements are defined, then the semantics imposed on them by the scenario and the loop are presented.
-These semantics allow both serial and parallel execution of musical processes.
 
-\subsection{Data types}
+For the sake of simplicity, the user interface merges the two graphs; section~\ref{sec.together} presents in detail some automatic set-up and enforced assumptions done by the software.
+
+
+
+
 \begin{figure}
     \centering
     \begin{subfigure}[t!]{0.45\textwidth}
@@ -271,6 +258,48 @@ These semantics allow both serial and parallel execution of musical processes.
     \end{subfigure}
 \end{figure}
 % TODO représenter trace d'exécution
+
+\section{Orchestrated data}\label{sec.device}
+We first define the data we operate on.
+External devices are modeled as a tree of optional parameters.
+
+Value parameters can have values of common data types such as integer, float, etc.
+Audio parameters are arrays that contain either the current input audio buffers of the sound card or the buffers that will be written to the sound card's output.
+
+The tree of nodes is akin to the methods and containers described in the OSC specification.
+
+\begin{align*}
+\mathbf{Value} & = \mathrm{Float} \mid \mathrm{Int} \mid \mathrm{Bool} \mid \mathrm{String} \mid \dots \\
+\mathbf{ValueParameter} & = \mathrm{Value} \times \mathrm{Protocol} \\
+\mathbf{AudioParameter} & = \mathrm{Float[][]} \times \mathrm{Protocol} \\
+\mathbf{Parameter} & = \mathrm{ValueParameter} \mid \mathrm{AudioParameter} \\
+\mathbf{Node} & = \mathrm{String} \times \mathrm{Maybe}~\mathrm{Parameter} \times \mathrm{Node[]} 
+\end{align*}
+
+Parameters and nodes bear additional metadata which is not relevant to describe here: textual description, tags, etc.
+
+The parameters's associated values match the state of an external device: synthesizer, etc.
+Multiple protocols are implemented to allow this: for instance OSC, MIDI, etc.
+
+We define two core operations on parameters: 
+\begin{align*}
+\mathbf{pull} & : \mathrm{Parameter} \rightarrow \mathrm{Parameter} \\
+              & (v, p) \mapsto (v', p)~\text{where v' is the last known value in the remote device}\\
+\mathbf{push} &: \mathrm{Parameter} \times \mathrm{Value} \rightarrow \mathrm{Parameter} \\
+              & (v, p), v' \mapsto (v', p)~\text{and v' is sent to the remote device} 
+\end{align*}
+
+\section{Temporal model}\label{sec.temporal}
+The temporal model is twofold: it is a hierarchical tree of processes, whose durations and execution times are directed by intervals organized in a \ac{DAG}. 
+The beginning and end of the intervals is subjected to various conditions that will be presented ; these conditions allow for various 
+interactive behaviours. % TODO Processes are any kind of relevant artistic process: automations, notes sequences, sound files. 
+In particular, specific dispositions of intervals and conditions are implemented as processes themselves, scenario and loop, which allows for hierarchy.
+
+We note: $\tc$ for temporal conditions, $\ic$ for instantaneous conditions, $\itv$ for intervals, $\proc$ for processes. 
+First, these elements are defined, then the semantics imposed on them by the scenario and the loop are presented.
+These semantics allow both serial and parallel execution of musical processes.
+
+\subsection{Data types}
     
     
 \subsubsection{Conditions and expressions}
@@ -742,6 +771,8 @@ Why isn't the delay cable not enough ? can't go backwards.
 pb: pauser au milieu: coupure. cas dans les boucles: on réécrit par dessus (buffer vidé sur start).
 \item Shader
 \end{itemize}
+
+
 \section{Combined model}
 -> on ajoute node aux tc
 
@@ -814,82 +845,11 @@ let main_loop root graph duration granularity
 
 \end{lstlisting}
 
+\todo{Détailler l'approche réactive}
 
-\section{Audio behaviour}
 
-\begin{figure}
-\centering
-\begin{tikzpicture}[scale=0.8]
-  \tikzstyle{event}=[circle,thick,fill=black];
-  
-    
-  \draw [dashed, line width = 1.5, opacity=0.3] (0, 9) -- (0, 6) ;
-  \draw [dashed, line width = 1.5, opacity=0.3] (7, 9) -- (7, 6) ;
-  \draw [dashed, line width = 1.5, opacity=0.3] (13, 11) -- (13, 6) ;
-  \draw [line width = 1.5, opacity=1] (0, 11) -- (0, 9) ;
-    
-  \coordinate (astart) at (0, 11);
-  \coordinate (aend) at (13, 11);
-  \draw [line width=2] (astart) -- (aend) node[midway,below,yshift=-3mm] {Automation curve};
-  \node[event] at (astart) {};
-  \node[event] at (aend) {};
-  
-  \coordinate (cstart) at (0, 9);
-  \coordinate (cmid) at (7, 9);  
-  \coordinate (cend) at (15, 9);    
-  \draw [line width=2] (cstart) -- (cmid) node[midway,below,yshift=-3mm] {Sound 1};
-  \draw [line width=2] (cmid) -- (cend) node[midway,below,yshift=-3mm] {Sound 2};
-  \node[event] at (cstart) {};
-  \node[event] at (cmid) {};
-  \node[event] at (cend) {};
-  
-  
-  % samples
-  \foreach \x in {0,...,14}
-    \draw [](0.1+\x, 7cm) -- (0.1+\x,6cm) -- (0.9+\x, 6cm) -- (0.9+\x,7cm);
-  
-  
-  % ticks
-  \foreach \x in {0,5,...,15}
-    \draw [line width=1.5](\x, 5.9cm) -- (\x, 6.5cm) node[] {};
-  \draw [line width=1.5](0, 5.9cm) -- (15, 5.9cm);
-  
-  
-    % samples
-    \foreach \x in {0,...,14}
-      \draw [](0.1+\x, 5cm) -- (0.1+\x,4cm) -- (0.9+\x, 4cm) -- (0.9+\x,5cm);
-    
-    
-    % ticks
-    \foreach \x in {0,5,...,15}
-      \draw [line width=1.5](\x, 3.9cm) -- (\x, 4.5cm) node[] {};
-    \draw [line width=1.5](0, 3.9cm) -- (15, 3.9cm);
-    
-\end{tikzpicture}
-\caption{A scenario. The small bins represent individual audio samples ; the bigger bins represent the tick rate of the sound card. For the sake of the example, one can assume that the automation curve is used to control the output volume of the englobing scenario, not represented here.}
-\label{fig.scenarautom}
-\end{figure}
+\subsection{Details}
 
-\begin{table}
-\centering
-\begin{tabular}{c|c|c|c|c}
- & Tick 0 & Tick 1 & Tick 2 & Tick 3 \\ 
-\hline 
-\textbf{Automation} & $(0, 0, 0)$ &  &  &  \\ 
-\textbf{Sound 1} & $(0, 0, 0)$ & $(0, 5, 0)$ & $(5, 7, 0)$ &  \\ 
-\textbf{Sound 2} &  &  & $(0, 3, 2)$ & $(3, 8, 0)$ \\ 
-\textbf{Scenario} & $(0, 0, 0)$ & $(0, 5, 0)$ & $(5, 10, 0)$ & $(10, 15, 0)$ \\ 
-\end{tabular} 
-\caption{Value of token requests for the scenario ~\ref{fig.scenarautom}. In each cell, $(a,b,c)$ stands for previous date, current date, offset.}
-\end{table}
-
-Expliquer tick avec données, offset, etc.
-
-Cas complexe: 
-
-dernier tick d'une boucle qui a un enfant fichier son + automation
-
-\section{Proposed sequencer behaviour}
 Conditions et cie: The most common case for an expression is to be true.
 
 UI: création automatique de liens implicites des enfants vers les parents si demandé (propriété de l'ui "propagate").
@@ -916,6 +876,67 @@ Choix pour multicanal: faire comme jamoma avec objets tilde
 pour que par exemple la production d'un état dans un scénario entraîne une condition dans un autre scénario -> tout réduire à un tick
 
 
+\section{Audio behaviour}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[scale=0.8]
+  \tikzstyle{event}=[circle,thick,fill=black];
+  
+  \draw [dashed, line width = 1.5, opacity=0.3] (0, 9) -- (0, 6) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (7, 9) -- (7, 6) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (13, 11) -- (13, 6) ;
+  \draw [line width = 1.5, opacity=1] (0, 11) -- (0, 9) ;
+    
+  \coordinate (astart) at (0, 11);
+  \coordinate (aend) at (13, 11);
+  \draw [line width=2] (astart) -- (aend) node[midway,below,yshift=-3mm] {Automation curve};
+  \node[event] at (astart) {};
+  \node[event] at (aend) {};
+  
+  \coordinate (cstart) at (0, 9);
+  \coordinate (cmid) at (7, 9);  
+  \coordinate (cend) at (15, 9);    
+  \draw [line width=2] (cstart) -- (cmid) node[midway,below,yshift=-3mm] {Sound 1};
+  \draw [line width=2] (cmid) -- (cend) node[midway,below,yshift=-3mm] {Sound 2};
+  \node[event] at (cstart) {};
+  \node[event] at (cmid) {};
+  \node[event] at (cend) {};
+  
+  
+  % samples
+  \foreach \x in {0,...,14}
+    \draw [](0.1+\x, 7cm) -- (0.1+\x,6cm) -- (0.9+\x, 6cm) -- (0.9+\x,7cm);
+  
+  % ticks
+  \foreach \x in {0,5,...,15}
+    \draw [line width=1.5](\x, 5.9cm) -- (\x, 6.5cm) node[] {};
+  \draw [line width=1.5](0, 5.9cm) -- (15, 5.9cm);
+\end{tikzpicture}
+\caption{A scenario. The small bins represent individual audio samples ; the bigger bins represent the tick rate of the sound card. For the sake of the example, one can assume that the automation curve is used to control the output volume of the englobing scenario, not represented here.}
+\label{fig.scenarautom}
+\end{figure}~
+\begin{table}[h]
+\centering
+\begin{tabular}{c|c|c|c|c}
+ & Tick 0 & Tick 1 & Tick 2 & Tick 3 \\ 
+\hline 
+\textbf{Automation} & $(0, 0, 0)$ &  &  &  \\ 
+\textbf{Sound 1} & $(0, 0, 0)$ & $(0, 5, 0)$ & $(5, 7, 0)$ &  \\ 
+\textbf{Sound 2} &  &  & $(0, 3, 2)$ & $(3, 8, 0)$ \\ 
+\textbf{Scenario} & $(0, 0, 0)$ & $(0, 5, 0)$ & $(5, 10, 0)$ & $(10, 15, 0)$ \\ 
+\end{tabular} 
+\caption{Value of token requests for the scenario ~\ref{fig.scenarautom}. In each cell, $(a,b,c)$ stands for previous date, current date, offset.}
+\end{table}
+
+Expliquer tick avec données, offset, etc.
+
+Cas complexe: 
+
+dernier tick d'une boucle qui a un enfant fichier son + automation
+
+
+
 \section{Mapping from visual language}
 All the objects in the visual language correspond to the objects presented earlier, at the exception of the states.
 
@@ -924,7 +945,7 @@ IC / TC / interval / processes : no change
 edges : between processes
 \section{Applications and examples}
 
-\subsection{Reconstructing existing paradigms}
+\subsection{Reconstructing existing paradigms}\label{sec.existingparadigms}
 In this part we give example of reconstruction of standard audio software behaviours with the given model.
 \subsubsection{Audio sequencer}
 Notable software in this category includes Steinberg Cubase, Avid Pro Tools, \dots
