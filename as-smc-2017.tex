@@ -165,7 +165,13 @@ Real-world examples are provided and discussed.
 We give here an overview of the whole system ; the choices and ideas proposed will be explained in detail in the following sections.
 
 The overall goal is to associate traditional dataflow graphs with temporal semantics.
-In terms of model, two structures are present: the dataflow graph which will generate and process musical data, and the control graph which will specify when and how the dataflow graph runs.
+In terms of model, three structures are present: 
+\begin{itemize}
+    \item A global environment in the form of a tree of parameters. 
+          It represents external software and hardware such as sound cards, MIDI controllers or OSC-compliant software
+    \item The dataflow graph which will generate and process musical data
+    \item The temporal graph which will specify when and how the dataflow graph runs.
+\end{itemize}
 
 For the dataflow graph, the traditional musical programming patterns of \todo{cite control-signal separation} and \todo{cite audio processing in buffers} are used.
 
@@ -176,10 +182,20 @@ The temporal graph allows three things :
 \item Merging of loop-based and timeline-based control: we show in section\ref{sec.existingparadigms} that this is enough to allow both time-based and loop-based behaviors to co-exist in a single structure and user interface, unlike existing approaches which splits those in two mostly distinct domains ; this enables a large array of possible intermediary behaviors.
 \end{itemize} 
 
-Then, at each tick, the temporal graph runs as described in section~\ref{sec.temporal}. This produces tokens in the dataflow graph nodes. Once tokens have been produced for every temporal structure, the data graph runs.
+Then, at each tick, the temporal graph runs as described in section~\ref{sec.temporal}.
+This produces tokens in the dataflow graph nodes. 
+Once tokens have been produced for every temporal structure, the data graph runs.
+Graph nodes which did not receive any token for a given tick will not be executed.
 
-To accomodate for the tempoarl semantics, special connection types
-
+To accomodate for the temporal semantics, dataflow semantics are extended with : 
+\begin{itemize}
+    \item The ability to specify input and output addresses to ports. 
+          This allows nodes to read and write directly from the global environment, in a specified way and can be used to leverage type information associated with the parameters.
+    \item Special connection types between edges to leverage the fact that not all nodes may be running at the same time.
+\end{itemize}
+ 
+When the graph runs, nodes read and write from input and output ports.
+Environment : local / global
 
 
 For the sake of simplicity, the user interface merges the two graphs; section~\ref{sec.together} presents in detail some automatic set-up and enforced assumptions done by the software.
