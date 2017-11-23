@@ -187,28 +187,26 @@ This produces tokens in the dataflow graph nodes.
 Once tokens have been produced for every temporal structure, the data graph runs.
 Graph nodes which did not receive any token for a given tick will not be executed.
 
-To accomodate for the temporal semantics, dataflow semantics are extended with : 
+To accommodate for the temporal semantics, dataflow semantics are extended with : 
 \begin{itemize}
     \item The ability to specify input and output addresses to ports. 
           This allows nodes to read and write directly from the global environment, in a specified way and can be used to leverage type information associated with the parameters.
     \item Special connection types between edges to leverage the fact that not all nodes may be running at the same time.
 \end{itemize}
  
-When the graph runs, nodes read and write from input and output ports.
-Environment : local / global
+When the graph runs, nodes read and write from their input and output ports ; relevant values are then copied in other ports or in the environment by the supervising algorithm.
 
+The environment is separated in two parts: a local part which can serve to reuse the result of given computations in further node executions, and a global part which maps to messages sent to external devices.
 
-For the sake of simplicity, the user interface merges the two graphs; section~\ref{sec.together} presents in detail some automatic set-up and enforced assumptions done by the software.
-
-
-
+For the sake of simplicity, the user interface merges the temporal and the data graphs in a single view. 
+Section~\ref{sec.together} presents in detail some automatic set-up and enforced assumptions done by the software.
 
 \begin{figure}
     \centering
     \begin{subfigure}[t!]{0.45\textwidth}
         \centering
         \small\def\qtreeunaryht{2ex}
-        \Tree [.interval
+        \Tree [.interval~I_0
         [.scenario 
         [.interval~I_1 mapping ] 
         [.interval~I_2 [.loop [.interval automation ] ] ] 
@@ -270,7 +268,7 @@ For the sake of simplicity, the user interface merges the two graphs; section~\r
         \end{pgfonlayer}
         \end{tikzpicture}
         
-        \caption{Temporal DAG}
+        \caption{Temporal DAG corresponding to the scenario}
     \end{subfigure}
 \end{figure}
 % TODO représenter trace d'exécution
@@ -308,15 +306,14 @@ We define two core operations on parameters:
 \section{Temporal model}\label{sec.temporal}
 The temporal model is twofold: it is a hierarchical tree of processes, whose durations and execution times are directed by intervals organized in a \ac{DAG}. 
 The beginning and end of the intervals is subjected to various conditions that will be presented ; these conditions allow for various 
-interactive behaviours. % TODO Processes are any kind of relevant artistic process: automations, notes sequences, sound files. 
+interactive behaviors. Processes represent various kinds of relevant artistic process: automations, notes sequences, sound files ; they are unrelated to the process concept in operating systems. 
 In particular, specific dispositions of intervals and conditions are implemented as processes themselves, scenario and loop, which allows for hierarchy.
 
 We note: $\tc$ for temporal conditions, $\ic$ for instantaneous conditions, $\itv$ for intervals, $\proc$ for processes. 
 First, these elements are defined, then the semantics imposed on them by the scenario and the loop are presented.
 These semantics allow both serial and parallel execution of musical processes.
 
-\subsection{Data types}
-    
+\subsection{Data types}   
     
 \subsubsection{Conditions and expressions}
 We first define the conditional operations we want to be able to express.
@@ -380,10 +377,10 @@ Temporal processes are executed by intervals at each tick.
 The actual processes will be defined in sections~, \ref{sec.scenario}, \ref{sec.loop}, \ref{sec.datamodel}.
 
 A process is a type $\proc$ associated with the following operations: 
-\begin{align*}
+\begin{align*}\label{proc.funs}
 \mathbf{start}&: \proc \rightarrow \proc \\
 \mathbf{stop}&: \proc \rightarrow \proc \\
-\mathbf{tick}&: \proc * \mathbb{Z} * \mathbb{Z} * \mathbb{R} \rightarrow P\\
+\mathbf{tick}&: \proc \times \mathbb{Z} \times \mathbb{Z} \times \mathbb{R} \rightarrow P\\
 \mathbf{Process}&: \mathrm{Scenario} \mid \mathrm{Loop} \mid  \dots
 \end{align*}
 \subsubsection{Interval}
@@ -424,10 +421,10 @@ type condition = {
 \end{lstlisting}
 It is preceded and followed by a set of intervals.
 
-Expressions are disabled either when they are false or when they are preceded by a non-null number of intervals, all of them already disabled through other conditions. This propagates recursiveley to the following intervals and conditions. 
+Expressions are disabled either when they are false or when they are preceded by a non-null number of intervals, all of them already disabled through other conditions. This propagates recursively to the following intervals and conditions. 
 
 \subsubsection{Temporal condition}
-A temporal condition is used to synchronize starts and ends of intervals, while allowing to implement behaviours such as : ``start the chorus when the fader is at 0''.
+A temporal condition is used to synchronize starts and ends of intervals, while allowing to implement behaviors such as : ``start the chorus when the fader is at 0''.
 
 Temporal conditions carry instantaneous conditions, which will be evaluated at the moment where the temporal condition becomes true.
 
@@ -443,168 +440,56 @@ type temporalCondition = {
 }
 \end{lstlisting}
 
-\subsubsection{Execution}
-Execution operates as follows: 
+\subsection{General execution}
+The overall execution consists in walking the tree of intervals and processes being executed, increasing their date, and generating tokens for the associated nodes.
+Executing a temporal interval simply means : 
 
-\begin{lstlisting}
-let tick_interval (itv:interval) t offset (state:score_state) =
-  let cur_date = (get_date itv state.itv_dates) in
-  let new_date = (cur_date + (truncate (ceil (float t) *. itv.speed))) in
-  let new_pos = (float new_date /. float itv.nominalDuration) in
-  let tp = tick_process cur_date new_date new_pos offset in
-  let rec exec_processes procs funs state =
-    match procs with
-    | [] -> (funs, state)
-    | proc::t -> let (nf, ns) = tp state proc in
-                 exec_processes t (funs@[nf]) ns
-  in
-  let (funs, state) = exec_processes itv.processes [] state in
-  ({ state with itv_dates = (set_date itv new_date state.itv_dates) },
-   (funs @ [ add_tick_to_node itv.itvNode (make_token new_date new_pos offset) ]))
+\begin{enumerate}
+\item Increase its date in the score state. 
+\item Execute the tick function of all the registered processes one after each other, with the same date and offset.
+\item Register a tick for the node associated with the interval, and collapse the functions returned from the ticking of processes.
+\end{enumerate}
+\[
+\mathrm{TickInterval}: \mathrm{Interval} \times \mathrm{Duration} \times \mathrm{Offset} \times \mathrm{State} \rightarrow \mathrm{GraphFun} \times \mathrm{State}
+\]
 
-\end{lstlisting}
-
-processes:
-\begin{lstlisting}
-let tick_process cur_date new_date new_pos offset state p  =
-   match p.impl with
-    | Scenario s -> tick_scenario p.procId s cur_date new_date new_pos offset state
-    | Loop l -> tick_loop l cur_date new_date new_pos offset state
-    | DefaultProcess -> (add_tick_to_node p.procNode (make_token new_date new_pos offset), state)
-
-\end{lstlisting}
+The type of a tick function for any given process is given in~\ref{proc.funs}; we now consider processes with a non-trivial temporal behavior: scenario and loop.
 
 \subsection{Temporal graph: scenario}\label{sec.scenario}
-Execution of a TC
-\begin{lstlisting}
+The central point in the execution of scenarios is the execution of the temporal conditions. 
 
-and scenario_process_TC scenario tc (state:score_state) =
-  let minDurReached ic (state:score_state) =
-    ...
-  in
-  let maxDurReached ic (state:score_state) =
-    ...
-  in
+The overall progression in the scenario occurs like this: 
 
-  let execute_ic scenario (state:score_state) ic =
-    ...
-  in
-  let execute_tc scenario tc (state:score_state) =
-    let rec execute_all_ics ics (state:score_state) started_itvs ended_itvs happened_ics =
-      match ics with
-      | [] -> (state, started_itvs, ended_itvs, happened_ics)
-      | cond::t -> let (newStatus, started, stopped) = execute_ic scenario state cond in
-                   execute_all_ics
-                    t
-                    (* update the statuses of the ICs with new values *)
-                    { state with ic_statuses = (list_assoc_replace state.ic_statuses cond.icId newStatus) }
-                    (started@started_itvs)
-                    (stopped@ended_itvs)
-                    (if newStatus = Happened then cond::happened_ics else happened_ics)
-    in
-    let (state, started_itv_ids, ended_itv_ids, happened_ics) = execute_all_ics tc.conds state [] [] [] in
+\begin{enumerate}
+\item Check for any root of the scenario that may start ; try to process them.
+\item Increase the date of every running time interval up to their max (if any), in the capacity allowed by the remaining time in the tick.
+\item Check for finished temporal conditions, process them, and potentially propagate remaining parts of the tick to following time intervals.
+\item Return to step 2. as long as any time interval can execute.
+\end{enumerate}
+\subsubsection{Execution of a temporal condition}
 
-    let rec start_all_intervals itvs (state:score_state) funs = 
-      ...
-    in
-    let (state, funs) =
-        start_all_intervals (get_intervals started_itv_ids scenario) state [] in
+First, let us define the following concepts for instantaneous conditions: they can be in different states:
+\begin{itemize}
+\item \textbf{Waiting}: the execution area has not been reached yet.
+\item \textbf{Pending}: the execution area has been reached.
+\item \textbf{Happened}: has been executed successfully.
+\item \textbf{Disposed}: has not been executed.
+\end{itemize}
 
-    (state, List.flatten funs, happened_ics)
-  in
+The execution area, for an instantaneous condition, is the part where all the previous active time intervals have reached their min duration.
 
+The evaluation of a temporal condition's expression is performed at each tick, as soon as all instantaneous conditions are pending. 
 
-  let rec mark_IC_min conds state =
-    ..
-  in
-  let state = mark_IC_min tc.conds state in
+Executing an instantaneous condition means checking its expression.
+\begin{itemize}
+\item If it is true: the previous intervals are stopped, and the next intervals are started, and it is marked as happened. 
+\item Else, the previous intervals are stopped, and it is marked as disposed.
+\end{itemize}
 
-  let tcMaxDurReached =
-    List.exists
-      (fun ic -> ((List.assoc ic.icId state.ic_statuses) = Pending) && (maxDurReached ic state))
-      tc.conds
-  in
-
-  let is_pending_or_disposed ic =
-    let cur_st = (List.assoc ic.icId state.ic_statuses) in
-    cur_st = Pending || cur_st = Disposed
-  in
-  
-  if (not (List.for_all is_pending_or_disposed tc.conds))
-  then
-    ((state, [ ], [ ]), false)
-  else
-    if ((tc.syncExpr <> true_expression) && (not tcMaxDurReached))
-    then
-      let state = { state with listeners = register_listeners tc.syncExpr state.listeners } in
-      if (not (evaluate tc.syncExpr state.scoreEnv state.listeners))
-      then      
-        ((state, [ ], [ ]), false)
-      else
-        let state = { state with listeners = unregister_listeners tc.syncExpr state.listeners } in        
-        (execute_tc scenario tc state, true)
-    else    
-     (execute_tc scenario tc state, true)
-
-\end{lstlisting}
-
-Scenario tick 
-\begin{lstlisting}
-let tick_scenario pid scenario olddate newdate pos offset (state:score_state) =
-  let dur = newdate - olddate in
-  let rec process_root_tempConds scenario tc_list state funs =
-     ...
-  in
-
-  let rec process_tempConds scenario tc_list (state:score_state) funs happened_ics =
-     ...
-  in
-
-  let rec process_intervals scenario itv_list overticks funs dur offset end_TCs state =
-     ...
-  in
-  
-  let (state, funcs) =
-    process_root_tempConds
-        scenario
-        (get_rootTempConds pid scenario state)
-        state [] in
-
-  let running_intervals = (List.filter (is_interval_running scenario state.ic_statuses) scenario.intervals) in
-  let (state, overticks, end_TCs, funcs) =
-    process_intervals scenario running_intervals [] funcs dur offset [] state in
-  let (state, funcs, conds) = process_tempConds scenario end_TCs state funcs [] in
-
-  let rec finish_tick scenario overticks conds funcs dur offset end_TCs state =
-    match conds with
-    | [ ] ->
-      (match end_TCs with
-       | [ ] -> (state, funcs)
-       | _ -> let (state, new_funs, conds) =
-                process_tempConds scenario end_TCs state [] [] in
-             finish_tick scenario overticks conds (funcs@new_funs) dur offset [ ] state)
-
-    | (cond:condition) :: remaining ->
-      match (List.assoc_opt (find_parent_TC cond scenario).tcId overticks) with
-      | None -> finish_tick scenario overticks remaining funcs dur offset end_TCs state
-      | Some (min_t, max_t) ->
-         let (state, overticks, end_TCs, funcs) =
-             process_intervals
-                scenario
-                (following_intervals cond scenario)
-                overticks funcs
-                max_t
-                (offset + dur - max_t)
-                end_TCs
-                state
-         in
-         finish_tick scenario overticks remaining funcs dur offset end_TCs state
-  in
-  
-  let (state, funcs) = finish_tick scenario overticks conds funcs dur offset end_TCs state in
-  (list_fun_combine funcs, state)
-;;
-\end{lstlisting}
+\begin{enumerate}
+\item 
+\end{enumerate}
+\subsubsection{General execution algorithm}
 
 \subsection{Loop}\label{sec.loop}
 Pbq: not introducing cycles in the temporal graph
@@ -672,45 +557,12 @@ Input mix on each port
 
 \begin{lstlisting}
 let init_port (p:port) g gs (e:environment) =
-  match p.portEdges with
-  | [] -> let pv = match p.portAddr with
-                | None -> None
-                | Some str -> Some (pull str e)
-                in
-         replace_value p gs pv         
-  | _ -> replace_value p gs (List.fold_left (aggregate_data g gs) None (get_edges p.portEdges g) )
-  ;;
 
 let init_node n g gs (e:environment) =
-  match n.data with
-    | Automation (op, curve)  -> clear_port op gs;
-    | Mapping (ip, op, curve) -> let gs = clear_port op gs in
-                                 init_port ip g gs e
-    | Sound (op, audio)       -> clear_port op gs;
-    | Passthrough (ip, op)    -> let gs = clear_port op gs in
-                                 init_port ip g gs e
-;;
 
 let write_port p (g:graph) (gs:graph_state) (e:environment) =
-  let has_targets = (p.portEdges = []) in
-  let all_targets_disabled =
-    has_targets &&
-    List.for_all (fun x -> in_port_disabled x g gs) p.portEdges in
-  if(not has_targets || all_targets_disabled) then
-    (gs, write_port_env p gs e)
-  else
-    (write_port_edges p gs, e)
-;;
 
 let teardown_node n g gs e =
-  match n.data with
-  | Automation (op, _)      -> write_port op g gs e;
-  | Sound (op, _)           -> write_port op g gs e;
-  | Mapping (ip, op, curve) -> let (gs, e) = write_port op g gs e in
-                               (clear_port ip gs, e);
-  | Passthrough (ip, op)    -> let (gs, e) = write_port op g gs e in
-                               (clear_port ip gs, e);
-;;
 \end{lstlisting}
 
 
@@ -732,26 +584,6 @@ do a tick:
 \begin{lstlisting}
 
 let rec sub_tick graph gs nodes (e:environment) =
- match nodes with
- | [ ] -> (gs, e);
- | _ ->
-   let next_nodes = List.filter can_execute nodes in
-   let next_nodes = List.sort (nodes_sort next_nodes) next_nodes in
-   match next_nodes with
-   | [ ] -> (gs, e) ;
-   | cur_node::q ->	
-     let gs = init_node cur_node graph gs e in
-     let rec run_ticks_for_node g gs n tokens =
-       match tokens with
-       | [] -> gs
-       | token::t -> let gs = exec_node g gs n (List.assoc n.nodeId gs.node_state) token
-                     in run_ticks_for_node g gs n t
-     in
-     let gs = run_ticks_for_node graph gs cur_node 
-     				(List.assoc cur_node.nodeId gs.node_state).tokens in
-     let (gs, e) = teardown_node cur_node graph gs e in
- 
-     sub_tick graph gs (remove_node next_nodes cur_node.nodeId) e;;
 \end{lstlisting}
 
 
@@ -805,10 +637,6 @@ Pour être propre, il faudrait faire un "pull" général au début...
 
 \begin{lstlisting}
 let add_tick_to_node nodeId token (gs:graph_state) =
-  let cur_state = (find_node_state gs nodeId) in
-  replace_node_state gs nodeId { cur_state with
-      tokens = cur_state.tokens @ [ token ];
-  }
 ;;
 \end{lstlisting}
 
@@ -825,39 +653,6 @@ Multiple possibilities for a tradeoff between accuracy and performance:
 \begin{lstlisting}
 let main_loop root graph duration granularity 
 			  (state:score_state) ext_events ext_modifications =
- let total_dur = duration in
- let rec main_loop_rec root graph
-                       remaining old_remaining granularity
-                       (state:score_state) (gs:graph_state) funs =
-   if remaining > 0
-   then
-     (
-     let elapsed = total_dur - remaining in
-     let old_elapsed = total_dur - old_remaining in
-     let (root,graph,state) = 
-     	ext_modifications root graph state old_elapsed elapsed  in
-     let (state, new_funs)  = 
-     	tick_interval root granularity 0 state in
-     let gs = add_missing graph gs in
-     let (gs, e)            = 
-     	tick_graph_topo graph (update_graph (funs@new_funs) gs) state.scoreEnv in
-     let state = 
-     { state with
-       scoreEnv = 
-         (update (commit e) ext_events old_elapsed elapsed);
-       listeners = 
-         (update_listeners state.listeners e.local ext_events old_elapsed elapsed)
-     } in
-     main_loop_rec root graph (remaining - granularity) old_remaining
-         granularity state gs []
-     )
-   else
-     (root, graph, state)
- in
- let (state, funs) = start_interval root state in
- let gs = { node_state = [] ; port_state = [] } in
- main_loop_rec root graph duration duration granularity state gs funs
-;;
 
 \end{lstlisting}
 
@@ -896,20 +691,23 @@ pour que par exemple la production d'un état dans un scénario entraîne une co
 
 \begin{figure}[h]
 \centering
-\begin{tikzpicture}[scale=0.8]
+\begin{tikzpicture}[scale=0.8,line cap=rect]
   \tikzstyle{event}=[circle,thick,fill=black];
   
-  \draw [dashed, line width = 1.5, opacity=0.3] (0, 9) -- (0, 6) ;
-  \draw [dashed, line width = 1.5, opacity=0.3] (7, 9) -- (7, 6) ;
-  \draw [dashed, line width = 1.5, opacity=0.3] (13, 11) -- (13, 6) ;
+  % gray dashes
+  \draw [dashed, line width = 1.5, opacity=0.3] (0, 9) -- (0, 6.4) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (7, 9) -- (7, 6.4) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (13, 11) -- (13, 6.4) ;
   \draw [line width = 1.5, opacity=1] (0, 11) -- (0, 9) ;
     
+  % automation
   \coordinate (astart) at (0, 11);
   \coordinate (aend) at (13, 11);
   \draw [line width=2] (astart) -- (aend) node[midway,below,yshift=-3mm] {Automation curve};
   \node[event] at (astart) {};
   \node[event] at (aend) {};
   
+  % sounds
   \coordinate (cstart) at (0, 9);
   \coordinate (cmid) at (7, 9);  
   \coordinate (cend) at (15, 9);    
@@ -922,12 +720,12 @@ pour que par exemple la production d'un état dans un scénario entraîne une co
   
   % samples
   \foreach \x in {0,...,14}
-    \draw [](0.1+\x, 7cm) -- (0.1+\x,6cm) -- (0.9+\x, 6cm) -- (0.9+\x,7cm);
+    \draw [](0.1+\x, 7.5cm) -- (0.1+\x,6.5cm) -- (0.9+\x, 6.5cm) -- (0.9+\x,7.5cm);
   
   % ticks
   \foreach \x in {0,5,...,15}
-    \draw [line width=1.5](\x, 5.9cm) -- (\x, 6.5cm) node[] {};
-  \draw [line width=1.5](0, 5.9cm) -- (15, 5.9cm);
+    \draw [line width=1.5](\x, 6.4cm) -- (\x, 7cm) node[] {};
+  \draw [line width=1.5](0, 6.4cm) -- (15, 6.4cm);
 \end{tikzpicture}
 \caption{A scenario. The small bins represent individual audio samples ; the bigger bins represent the tick rate of the sound card. For the sake of the example, one can assume that the automation curve is used to control the output volume of the englobing scenario, not represented here.}
 \label{fig.scenarautom}
@@ -935,14 +733,128 @@ pour que par exemple la production d'un état dans un scénario entraîne une co
 \begin{table}[h]
 \centering
 \begin{tabular}{c|c|c|c|c}
- & Tick 0 & Tick 1 & Tick 2 & Tick 3 \\ 
+ & Start & Tick 1 & Tick 2 & Tick 3 \\ 
 \hline 
-\textbf{Automation} & $(0, 0, 0)$ &  &  &  \\ 
-\textbf{Sound 1} & $(0, 0, 0)$ & $(0, 5, 0)$ & $(5, 7, 0)$ &  \\ 
-\textbf{Sound 2} &  &  & $(0, 3, 2)$ & $(3, 8, 0)$ \\ 
-\textbf{Scenario} & $(0, 0, 0)$ & $(0, 5, 0)$ & $(5, 10, 0)$ & $(10, 15, 0)$ \\ 
+\textbf{Automation} & $(0 \rightarrow 0, 0)$ &  &  &  \\ 
+\textbf{Sound 1} & $(0 \rightarrow 0, 0)$ & $(0 \rightarrow 5, 0)$ & $(5 \rightarrow 7, 0)$ &  \\ 
+\textbf{Sound 2} &  &  & $(0 \rightarrow 3, 2)$ & $(3 \rightarrow 8, 0)$ \\ 
+\textbf{Scenario} & $(0 \rightarrow 0, 0)$ & $(0 \rightarrow 5, 0)$ & $(5 \rightarrow 10, 0)$ & $(10 \rightarrow 15, 0)$ \\ 
 \end{tabular} 
-\caption{Value of token requests for the scenario ~\ref{fig.scenarautom}. In each cell, $(a,b,c)$ stands for previous date, current date, offset.}
+\caption{Value of token requests for the scenario ~\ref{fig.scenarautom}. The tokens are written as (previous date $\rightarrow$ current date, offset).}
+\end{table}
+
+
+
+\tikzstyle{flexinterv}=[dash pattern=on 8pt off 4pt];
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[scale=0.8,line cap=rect]
+  \tikzstyle{event}=[circle,thick,fill=black];
+  
+  % gray dashes
+  \draw [dashed, line width = 1.5, opacity=0.3] (0, 9) -- (0, 6.4) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (7, 9) -- (7, 6.4) ;
+    
+  % sounds
+  \coordinate (cstart) at (0, 9);
+  \coordinate (cflex) at(3, 9);
+  \coordinate (cmid) at (7, 9);  
+  \coordinate (cend) at (15, 9);
+  \draw [line width=0,draw=none] (cstart) -- (cmid) node[midway,below,yshift=-3mm] {Sound 1};
+  \draw [line width=2] (cstart) -- (cflex);
+  \draw [line width=2,flexinterv] (cflex) -- (cmid);
+  \draw [line width=2] (cmid) -- (cend) node[midway,below,yshift=-3mm] {Sound 2};
+  
+  \draw [line width=2] ([shift={(3.3,9)}] 90:0.3) arc[radius=0.3, start angle=90, end angle=270] ;
+  \node[event] at (cstart) {};
+  \node[event] at (cmid) {};
+  \node[event] at (cend) {};
+  
+  
+  % samples
+  \foreach \x in {0,...,14}
+    \draw [](0.1+\x, 7.5cm) -- (0.1+\x,6.5cm) -- (0.9+\x, 6.5cm) -- (0.9+\x,7.5cm);
+  
+  % ticks
+  \foreach \x in {0,5,...,15}
+    \draw [line width=1.5](\x, 6.4cm) -- (\x, 7cm) node[] {};
+  \draw [line width=1.5](0, 6.4cm) -- (15, 6.4cm);
+  
+
+  % event  
+  \draw [dashed, line width = 3, color=orange] (5.7, 9.5) -- (5.7, 8.5)
+        node[above,yshift=8mm] {An external event happens} ;
+\end{tikzpicture}
+\caption{A scenario with an interaction.}
+\label{fig.scenarinteract}
+\end{figure}~
+\begin{table}[h]
+\centering
+\begin{tabular}{c|c|c|c|c}
+ & Start & Tick 1 & Tick 2 & Tick 3 \\ 
+\hline 
+\textbf{Sound 1} & $(0 \rightarrow 0, 0)$ & $(0 \rightarrow 5, 0)$ & $(5 \rightarrow 10, 0)$ & \\ 
+\textbf{Sound 2} &  &  &  & $(0 \rightarrow 5, 0)$ \\ 
+\textbf{Scenario} & $(0 \rightarrow 0, 0)$ & $(0 \rightarrow 5, 0)$ & $(5 \rightarrow 10, 0)$ & $(10 \rightarrow 15, 0)$ \\ 
+\end{tabular} 
+\caption{Value of token requests for the scenario~\ref{fig.scenarinteract}.}
+\end{table}
+
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[scale=0.8,line cap=rect]
+  \tikzstyle{event}=[circle,thick,fill=black];
+  
+  % gray dashes
+  \draw [dashed, line width = 1.5, opacity=0.3] (0, 9) -- (0, 6.4) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (7, 9) -- (7, 6.4) ;
+  \draw [dashed, line width = 1.5, opacity=0.3] (14, 9) -- (14, 6.4) ;
+  \draw [line width = 1.5, opacity=1] (0, 11) -- (0, 9) ;
+    
+  % loop
+  \coordinate (cstart) at (0, 11);
+  \coordinate (cend) at (15, 11);    
+  \draw [line width=2,flexinterv] (cstart) -- (cend) node[midway,below,yshift=-3mm] {Loop};
+  \node[event] at (cstart) {};
+  
+  % pattern  
+  \coordinate (lstart) at (0, 9);
+  \coordinate (lend) at (7, 9);  
+  \draw [line width=2] (lstart) -- (lend) node[midway,below,yshift=-3mm] {Loop pattern (sound)};
+      
+  % repetition
+  \coordinate (rstart) at (7, 9);
+  \coordinate (rend) at (14, 9); 
+  \coordinate (rend2) at (15, 9);  
+  \draw [line width=2, color=gray] (rend) -- (rend2);    
+  
+  \draw [line width=2, color=gray] (rstart) -- (rend) node[midway,below,yshift=-3mm] {Repetition};    
+  \node[event] at (lstart) {};   
+  \node[event] at (lend) {}; 
+  \node[event, color=gray] at (rend) {};
+  
+  % samples
+  \foreach \x in {0,...,14}
+    \draw [](0.1+\x, 7.5cm) -- (0.1+\x,6.5cm) -- (0.9+\x, 6.5cm) -- (0.9+\x,7.5cm);
+    
+  % ticks
+  \foreach \x in {0,5,...,15}
+    \draw [line width=1.5](\x, 6.4cm) -- (\x, 7cm) node[] {};
+  \draw [line width=1.5](0, 6.4cm) -- (15, 6.4cm);
+\end{tikzpicture}
+\caption{A loop. The small bins represent individual audio samples ; the bigger bins represent the tick rate of the sound card. For the sake of the example, one can assume that the automation curve is used to control the output volume of the englobing scenario, not represented here.}
+\label{fig.loopautom}
+\end{figure}~
+\begin{table}[h]
+\centering
+\begin{tabular}{c|c|c|c|c}
+ & Start & Tick 1 & Tick 2 & Tick 3 \\ 
+\hline 
+\textbf{Pattern} & $(0 \rightarrow 0, 0)$ & $(0\rightarrow 5, 0)$ & $(5\rightarrow 7, 0), (0 \rightarrow 3, 2)$ & $(3 \rightarrow 7, 0), (0 \rightarrow 1, 4)$ \\ 
+\textbf{Loop} & $(0 \rightarrow 0, 0)$ & $(0 \rightarrow 5, 0)$ & $(5 \rightarrow 10, 0)$ & $(10 \rightarrow 15, 0)$ \\ 
+\end{tabular} 
+\caption{Value of token requests for the scenario~\ref{fig.loopautom}}
 \end{table}
 
 Expliquer tick avec données, offset, etc.
@@ -1042,8 +954,8 @@ A run in the carousel generally operates as follows:
     \item At the end of the song, the participants hear a summarized version of the song they just played. This version also has additional corrections and adjustments applied algorithmically.
 \end{itemize}
 
-- Réutilisation des données d'entrée: scores sur certaines parties ; réutilisation de certaines notes et des pics d'intensité -> nécessite d/dx
-- Gammes: filtrage global du MIDI In
+- Réutilisation des données d'entrée: scores sur certaines parties ; réutilisation de certaines notes et des pics d'intensité -> nécessite d/dx -> mapping
+- Gammes: filtrage global du MIDI In => on le met dans des addresses
 
 \subsection{Notes on implementation}
 
