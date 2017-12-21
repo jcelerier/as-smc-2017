@@ -29,6 +29,7 @@
 \usepackage{subcaption}
 \usepackage{acronym}
 \usepackage{todonotes}
+\usepackage{algorithmicx}
 \usetikzlibrary{shapes.geometric,positioning,fit,backgrounds}
 %=================================================================
 %% Please use the following mathematics environments: Theorem, Lemma, Corollary, Proposition, Characterization, Property, Problem, Example, ExamplesandDefinitions, Hypothesis, Remark, Definition
@@ -374,14 +375,14 @@ Two operations are defined on expressions and the data types that compose them:
 
 \subsubsection{Temporal processes}
 Temporal processes are executed by intervals at each tick. 
-The actual processes will be defined in sections~, \ref{sec.scenario}, \ref{sec.loop}, \ref{sec.datamodel}.
+The actual processes will be defined in sections~\ref{sec.scenario}, \ref{sec.loop}, \ref{sec.datamodel}.
 
 A process is a type $\proc$ associated with the following operations: 
 \begin{align*}\label{proc.funs}
 \mathbf{start}&: \proc \rightarrow \proc \\
 \mathbf{stop}&: \proc \rightarrow \proc \\
 \mathbf{tick}&: \proc \times \mathbb{Z} \times \mathbb{Z} \times \mathbb{R} \rightarrow P\\
-\mathbf{Process}&: \mathrm{Scenario} \mid \mathrm{Loop} \mid  \dots
+\mathbf{Process}&: \mathrm{Scenario} \mid \mathrm{Loop} \mid \dots
 \end{align*}
 \subsubsection{Interval}
 We want to be able to express the passing of time, for a given duration.
@@ -405,7 +406,7 @@ type interval = {
 \end{lstlisting}
 
 The time scale is not specified by the system: for instance, when working with audio data it may be better to use the audio sample as a base unit of time.
-But many applications don't use the audio rate: when working purely with visuals it may be better to use the screen refresh rate as time base in order not to 
+But many artistic applications don't use the audio rate: when working purely with visuals it may be better to use the screen refresh rate as time base in order not to 
 waste computer resources and energy. 
 
 \subsubsection{Instantaneous condition}
@@ -442,6 +443,7 @@ type temporalCondition = {
 
 \subsection{General execution}
 The overall execution consists in walking the tree of intervals and processes being executed, increasing their date, and generating tokens for the associated nodes.
+Multiples tokens can be generated for a single data node in a given tick; the use case will be explained in section~\ref{sec.loop}.
 Executing a temporal interval means : 
 
 \begin{enumerate}
@@ -551,21 +553,60 @@ Executing an instantaneous condition means checking its expression.
 \end{figure}
 
 \todo{Expliquer comment on évite les deadlocks: notamment, on progresse toujours dans les autres contraintes même si on arrive au max}
-\todo{Dire qu'il y a des cas problématiques}
-\todo{Canaux audio: comme Jamoma ; groupés (vs comme Max / Pd ou chaque canal a son cable)}
-\todo{Opérateurs de mixage / démixage}
-% TODO pourquoi ne pas juste avoir des process "traitement du signal" flottants dans le viewport ? bof pour la gestion du temps
-\begin{enumerate}
-\item 
-\end{enumerate}
+
 \subsubsection{General execution algorithm}
 
+* Main score and sub-scores: main score only triggers once. 
+* Convenience: Sub-scores can always re-trigger and be restarted.
+
+\begin{algpseudocode}
+\Function{ExecuteTemporalCondition}
+
+\Function{Tick}
+  Check roots
+  Check and execute waiting temporal conditions
+  Advance running intervals
+  \Do 
+    \For(All the newly happened instantaneous conditions)
+      Advance following running intervals
+    Check and execute all finished temporal conditions
+  \While{At least a temporal condition did execute}
+\end{algpseudocode}
 \subsection{Loop}\label{sec.loop}
-Pbq: not introducing cycles in the temporal graph
+The first idea for loops would be to create a cycle in the scenario graph presented earlier.
+However, acyclicity of this graph is a desirable property: this allows to keep the complexity of graph traversal operations used lower,
+which matters in a real-time execution context.
+
+Hence, we chose instead to model the loop as its own process with simpler semantics: 
+a single time interval will loop. Since intervals can contain other processes, we can still encounter complex musical behaviour in it:
+whole scenarios can loop.
+
+A loop is simply defined as : 
+\begin{lstlisting}
+type loop = {
+  itv: interval
+  startTc: temporalCondition; 
+  endTc: temporalCondition;
+}
+\end{lstlisting}
+
+At each tick of the loop, the interval is itself executed.
+If either of the temporal conditions is interactive, we follow the same process than for the scenario: 
+we wait until the next tick to perform the triggering instead of doing it immediately. 
+Else, further tokens are added to the interval and its child processes, starting from zero.
+An example of this process is given in fig.~\ref{fig.loopautom}.
+
+Null loop durations are prevented at creation time: else, any tick operation would cause an infinite loop since there 
+would never be any progression in the loop.
+
+\subsection{Conclusion}
 
 \section{Data model}\label{sec.datamodel}
 => set date
 => set offset pour offset audio (p-ê pas nécessaire si on fait comme LAStream)
+\todo{Canaux audio: comme Jamoma ; groupés (vs comme Max / Pd ou chaque canal a son cable)}
+% \todo{Opérateurs de mixage / démixage}
+% TODO pourquoi ne pas juste avoir des process "traitement du signal" flottants dans le viewport ? bof pour la gestion du temps
 
 \section{Data graph}
 
@@ -757,7 +798,6 @@ Choix pour multicanal: faire comme jamoma avec objets tilde
 - Dire qu'on pourrait affiner en combinant plus précisément les "sous-ticks" temporels et de données
 pour que par exemple la production d'un état dans un scénario entraîne une condition dans un autre scénario -> tout réduire à un tick
 
-
 \section{Audio behaviour}
 
 \begin{figure}[h]
@@ -914,7 +954,7 @@ pour que par exemple la production d'un état dans un scénario entraîne une co
     \draw [line width=1.5](\x, 6.4cm) -- (\x, 7cm) node[] {};
   \draw [line width=1.5](0, 6.4cm) -- (15, 6.4cm);
 \end{tikzpicture}
-\caption{A loop. The small bins represent individual audio samples ; the bigger bins represent the tick rate of the sound card. For the sake of the example, one can assume that the automation curve is used to control the output volume of the englobing scenario, not represented here.}
+\caption{A loop containing a sound.}
 \label{fig.loopautom}
 \end{figure}~
 \begin{table}[h]
