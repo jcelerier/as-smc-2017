@@ -561,8 +561,16 @@ Executing an instantaneous condition means checking its expression.
 
 \begin{algpseudocode}
 \Function{ExecuteTemporalCondition}
-
-\Function{Tick}
+\EndFunction
+\Function{RunInterval}{itv, tick}
+  Add last node to ending node set
+  \If(The interval is infinite)
+    \Let{$d$}{$\min$ tick (itv.max - itv.date)}
+    Add over-tick 
+  \Else
+  \Endif
+\EndFunction
+\Function{Tick}{tick}
   Check roots
   Check and execute waiting temporal conditions
   Advance running intervals
@@ -571,6 +579,7 @@ Executing an instantaneous condition means checking its expression.
       Advance following running intervals
     Check and execute all finished temporal conditions
   \While{At least a temporal condition did execute}
+\EndFunction
 \end{algpseudocode}
 \subsection{Loop}\label{sec.loop}
 The first idea for loops would be to create a cycle in the scenario graph presented earlier.
