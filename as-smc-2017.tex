@@ -1,18 +1,7 @@
 
 %=================================================================
-\documentclass[applsci,article,submit,moreauthors,pdftex,10pt,a4paper]{mdpi}
+\documentclass{article}
 %=================================================================
-\firstpage{1} 
-\makeatletter 
-\setcounter{page}{\@firstpage} 
-\makeatother 
-\articlenumber{x}
-\doinum{10.3390/------}
-\pubvolume{xx}
-\pubyear{2017}
-\copyrightyear{2017}
-\externaleditor{Academic Editor: name}
-\history{Received: date; Accepted: date; Published: date}
 
 %------------------------------------------------------------------
 % The following line should be uncommented if the LaTeX file is uploaded to arXiv.org
@@ -29,7 +18,8 @@
 \usepackage{subcaption}
 \usepackage{acronym}
 \usepackage{todonotes}
-\usepackage{algorithmicx}
+\usepackage{algorithmicx,algpseudocode,algorithm}
+\usepackage{amsmath,amssymb}
 \usetikzlibrary{shapes.geometric,positioning,fit,backgrounds}
 %=================================================================
 %% Please use the following mathematics environments: Theorem, Lemma, Corollary, Proposition, Characterization, Property, Problem, Example, ExamplesandDefinitions, Hypothesis, Remark, Definition
@@ -37,39 +27,39 @@
 
 %=================================================================
 % Full title of the paper (Capitalized)
-\Title{A model for interactive media authoring}
+%\Title{A model for interactive media authoring}
 
 % Author Orchid ID: enter ID or remove command
 \newcommand{\orcidauthorA}{0000-0003-1253-298X} % Add \orcidA{} behind the author's name
 %\newcommand{\orcidauthorB}{0000-0000-000-000X} % Add \orcidB{} behind the author's name
 
 % Authors, for the paper (add full first names)
-\Author{Jean-Michaël Celerier $^{1,\dagger,\ddagger}$\orcidA{}, Myriam Desainte-Catherine $^{1,\ddagger}$ and Bernard Serpette $^{2,}$*}
+%\Author{Jean-Michaël Celerier $^{1,\dagger,\ddagger}$\orcidA{}, Myriam Desainte-Catherine $^{1,\ddagger}$ and Bernard Serpette $^{2,}$*}
 
 % Authors, for metadata in PDF
-\AuthorNames{Jean-Michaël Celerier, Myriam Desainte-Catherine and Bernard Serpette}
+%\AuthorNames{Jean-Michaël Celerier, Myriam Desainte-Catherine and Bernard Serpette}
 
 % Affiliations / Addresses (Add [1] after \address if there is only one affiliation.)
-\address{%
-    $^{1}$ \quad Affiliation 1; e-mail@e-mail.com\\
-    $^{2}$ \quad Affiliation 2; e-mail@e-mail.com}
-
+%\address{%
+%    $^{1}$ \quad Affiliation 1; e-mail@e-mail.com\\
+%    $^{2}$ \quad Affiliation 2; e-mail@e-mail.com}
+%
 % Contact information of the corresponding author
-\corres{Correspondence: e-mail@e-mail.com; Tel.: +x-xxx-xxx-xxxx}
+%\corres{Correspondence: e-mail@e-mail.com; Tel.: +x-xxx-xxx-xxxx}
 
 % Current address and/or shared authorship
-\firstnote{Current address: Affiliation 3} 
-\secondnote{These authors contributed equally to this work.}
+%\firstnote{Current address: Affiliation 3} 
+%\secondnote{These authors contributed equally to this work.}
 % The commands \thirdnote{} till \eighthnote{} are available for further notes
 
 % Simple summary
 %\simplesumm{}
 
 % Abstract (Do not insert blank lines, i.e. \\) 
-\abstract{A single paragraph of about 200 words maximum. For research articles, abstracts should give a pertinent overview of the work. We strongly encourage authors to use the following style of structured abstracts, but without headings: 1) Background: Place the question addressed in a broad context and highlight the purpose of the study; 2) Methods: Describe briefly the main methods or treatments applied; 3) Results: Summarize the article's main findings; and 4) Conclusion: Indicate the main conclusions or interpretations. The abstract should be an objective representation of the article, it must not contain results which are not presented and substantiated in the main text and should not exaggerate the main conclusions.}
+%\abstract{A single paragraph of about 200 words maximum. For research articles, abstracts should give a pertinent overview of the work. We strongly encourage authors to use the following style of structured abstracts, but without headings: 1) Background: Place the question addressed in a broad context and highlight the purpose of the study; 2) Methods: Describe briefly the main methods or treatments applied; 3) Results: Summarize the article's main findings; and 4) Conclusion: Indicate the main conclusions or interpretations. The abstract should be an objective representation of the article, it must not contain results which are not presented and substantiated in the main text and should not exaggerate the main conclusions.}
 
 % Keywords
-\keyword{interactive scores; intermedia; dataflow; patcher; i-score}
+%\keyword{interactive scores; intermedia; dataflow; patcher; i-score}
 
 % The fields PACS, MSC, and JEL may be left empty or commented out if not applicable
 %\PACS{J0101}
@@ -77,7 +67,7 @@
 %\JEL{}
 
 
-\featuredapplication{Authors are encouraged to provide a concise description of the specific application or a potential application of the work. This section is not mandatory.}
+%\featuredapplication{Authors are encouraged to provide a concise description of the specific application or a potential application of the work. This section is not mandatory.}
 
 \acrodef{DAG}{Directed Acyclic Graph}
 
@@ -559,28 +549,28 @@ Executing an instantaneous condition means checking its expression.
 * Main score and sub-scores: main score only triggers once. 
 * Convenience: Sub-scores can always re-trigger and be restarted.
 
-\begin{algpseudocode}
-\Function{ExecuteTemporalCondition}
-\EndFunction
-\Function{RunInterval}{itv, tick}
-  Add last node to ending node set
-  \If(The interval is infinite)
-    \Let{$d$}{$\min$ tick (itv.max - itv.date)}
-    Add over-tick 
-  \Else
-  \Endif
-\EndFunction
-\Function{Tick}{tick}
-  Check roots
-  Check and execute waiting temporal conditions
-  Advance running intervals
-  \Do 
-    \For(All the newly happened instantaneous conditions)
-      Advance following running intervals
-    Check and execute all finished temporal conditions
-  \While{At least a temporal condition did execute}
-\EndFunction
-\end{algpseudocode}
+% \begin{algorithmic}
+% \Function{ExecuteTemporalCondition}
+% \EndFunction
+% \Function{RunInterval}{itv, tick}
+%   Add last node to ending node set
+%   \If(The interval is infinite)
+%     \Let{$d$}{$\min$ tick (itv.max - itv.date)}
+%     Add over-tick 
+%   \Else
+%   \Endif
+% \EndFunction
+% \Function{Tick}{tick}
+%   Check roots
+%   Check and execute waiting temporal conditions
+%   Advance running intervals
+%   \Do 
+%     \For(All the newly happened instantaneous conditions)
+%       Advance following running intervals
+%     Check and execute all finished temporal conditions
+%   \While{At least a temporal condition did execute}
+% \EndFunction
+% \end{algorithmic}
 \subsection{Loop}\label{sec.loop}
 The first idea for loops would be to create a cycle in the scenario graph presented earlier.
 However, acyclicity of this graph is a desirable property: this allows to keep the complexity of graph traversal operations used lower,
@@ -1063,21 +1053,6 @@ Process 3 : FX
 Process 4 : scenario
 Audio Input -> itv {1,2,3} -> scenario -> fx -> scenario
 
-\subsubsection{Musical carousel}
-We present here a real-world interactive music example: the musical carousel.
-Each seat on the carousel has different instrument-like input devices: reactive pads, motion sensors, etc.
-A run in the carousel generally operates as follows: 
-
-\begin{itemize}
-    \item The first few seconds, the rules of the carousel are explained to the participants.
-    \item The song starts: the passengers can start interacting with their instruments. An overall music is generated from their interpretation. Played notes stay in predefinite scales which may vary over time; pre-recorded parts can also be layered on top. The overall song structure can vary according to the intensity of the played music: for instance, if everyone plays \textit{piano}, different instruments may become available in the next section of the song, a part may be shorter or longer, etc. Such variations are written by the composer for each song.
-    \item At the end of the song, the participants hear a summarized version of the song they just played. This version also has additional corrections and adjustments applied algorithmically.
-\end{itemize}
-
-- Réutilisation des données d'entrée: scores sur certaines parties ; réutilisation de certaines notes et des pics d'intensité -> nécessite d/dx -> mapping
-- Gammes: filtrage global du MIDI In => on le met dans des addresses
-
-- Addresses utilisées en global: /tempo, /scale, /quantification
 \subsection{Notes on implementation}
 
 
@@ -1112,17 +1087,7 @@ missing: quantification
 
 missing: sound speed
 
-\supplementary{The following are available online at www.mdpi.com/link, Figure S1: title, Table S1: title, Video S1: title.}
 
-\acknowledgments{
-    Blue Yeti, ANRT, SCRIME 
-    All sources of funding of the study should be disclosed. Please clearly indicate grants that you have received in support of your research work. Clearly state if you received funds for covering the costs to publish in open access.}
-
-\authorcontributions{For research articles with several authors, a short paragraph specifying their individual contributions must be provided. The following statements should be used ``X.X. and Y.Y. conceived and designed the experiments; X.X. performed the experiments; X.X. and Y.Y. analyzed the data; W.W. contributed reagents/materials/analysis tools; Y.Y. wrote the paper.'' Authorship must be limited to those who have contributed substantially to the work reported.}
-
-\conflictsofinterest{The authors declare no conflict of interest. The founding sponsors had no role in the design of the study; in the collection, analyses, or interpretation of data; in the writing of the manuscript, and in the decision to publish the results.} 
-
-\externalbibliography{yes}
 \bibliography{biblio}
 
 \end{document}
